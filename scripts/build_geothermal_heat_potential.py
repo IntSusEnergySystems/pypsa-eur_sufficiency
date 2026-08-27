@@ -10,13 +10,12 @@ It scales the heat source utilisation potentials to technical potentials by divi
 
 Relevant Settings
 -----------------
-```yaml
-sector:
-    district_heating:
-        limited_heat_sources:
-            geothermal:
-                constant_temperature_celsius
-```
+.. code:: yaml
+    sector:
+        district_heating:
+            limited_heat_sources:
+                geothermal:
+                    constant_temperature_celsius
 
 Inputs
 ------
@@ -245,7 +244,7 @@ if __name__ == "__main__":
             "Unnamed: 2_level_0",
             "Unit",
         )
-    ].iloc[0]
+    ][0]
     geothermal_supply_potentials = isi_heat_potentials[
         (
             f"Supply_potentials_{this_temperature_scenario}",

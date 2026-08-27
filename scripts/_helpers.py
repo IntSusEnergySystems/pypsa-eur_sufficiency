@@ -2,7 +2,6 @@
 #
 # SPDX-License-Identifier: MIT
 
-import atexit
 import contextlib
 import copy
 import logging
@@ -10,27 +9,20 @@ import os
 import re
 import time
 from collections.abc import Callable
-from functools import lru_cache, partial, wraps
-from itertools import takewhile
-from operator import attrgetter
+from functools import partial, wraps
 from pathlib import Path
 from tempfile import NamedTemporaryFile
-from typing import Literal
 
 import atlite
 import fiona
-import numpy as np
 import pandas as pd
 import pypsa
 import pytz
 import requests
 import xarray as xr
 import yaml
-from dask.distributed import Client, LocalCluster
 from snakemake.utils import update_config
 from tqdm import tqdm
-
-from scripts.lib.validation.config.data import VersionsSchema
 
 logger = logging.getLogger(__name__)
 
@@ -159,27 +151,6 @@ def path_provider(dir, rdir, shared_resources, exclude_from_shared):
         shared_resources=shared_resources,
         exclude_from_shared=exclude_from_shared,
     )
-
-
-def script_path_provider(project_dir: Path) -> Callable[[str], Path]:
-    """
-    Returns a function that provides the full path to a script given its name.
-
-    Parameters
-    ----------
-    project_dir : Path
-        The root directory of the project (where the script directory is located).
-
-    Returns
-    -------
-    Callable[[str], Path]
-        A function that takes a script name as input and returns the full path to the script.
-    """
-
-    def _get_script_path(script: str) -> Path:
-        return Path("file://") / project_dir / "scripts" / script
-
-    return _get_script_path
 
 
 def get_shadow(run):
@@ -404,21 +375,21 @@ def aggregate_costs(n, flatten=False, opts=None, existing_only=False):
 
     costs = {}
     for c, (p_nom, p_attr) in zip(
-        n.components[list(components.keys())], components.values()
+        n.iterate_components(components.keys(), skip_empty=False), components.values()
     ):
-        if c.static.empty:
+        if c.df.empty:
             continue
         if not existing_only:
             p_nom += "_opt"
         costs[(c.list_name, "capital")] = (
-            (c.static[p_nom] * c.static.capital_cost).groupby(c.static.carrier).sum()
+            (c.df[p_nom] * c.df.capital_cost).groupby(c.df.carrier).sum()
         )
         if p_attr is not None:
-            p = c.dynamic[p_attr].sum()
+            p = c.pnl[p_attr].sum()
             if c.name == "StorageUnit":
                 p = p.loc[p > 0]
             costs[(c.list_name, "marginal")] = (
-                (p * c.static.marginal_cost).groupby(c.static.carrier).sum()
+                (p * c.df.marginal_cost).groupby(c.df.carrier).sum()
             )
     costs = pd.concat(costs)
 
@@ -720,7 +691,7 @@ def update_config_from_wildcards(config, w, inplace=True):
                 config["electricity"]["gaslimit"] = gasl_value * 1e6
 
         if "Ept" in opts:
-            config["costs"]["emission_prices"]["dynamic"] = True
+            config["costs"]["emission_prices"]["co2_monthly_prices"] = True
 
         ep_enable, ep_value = find_opt(opts, "Ep")
         if ep_enable:
@@ -917,7 +888,9 @@ def get_snapshots(
         )
         time_periods.append(period)
 
-    time = pd.DatetimeIndex([ts for period in time_periods for ts in period])
+    time = pd.DatetimeIndex([])
+    for period in time_periods:
+        time = time.append(period)
 
     if drop_leap_day and time.is_leap_year.any():
         time = time[~((time.month == 2) & (time.day == 29))]
@@ -1031,9 +1004,7 @@ def rename_techs(label: str) -> str:
 
 
 def load_cutout(
-    cutout_files: str | list[str],
-    time: None | pd.DatetimeIndex = None,
-    chunks: Literal["auto"] | dict | None = "auto",
+    cutout_files: str | list[str], time: None | pd.DatetimeIndex = None
 ) -> atlite.Cutout:
     """
     Load and optionally combine multiple cutout files.
@@ -1052,9 +1023,9 @@ def load_cutout(
         Merged cutout with optional time selection applied.
     """
     if isinstance(cutout_files, str):
-        cutout = atlite.Cutout(cutout_files, chunks=chunks)
+        cutout = atlite.Cutout(cutout_files)
     elif isinstance(cutout_files, list):
-        cutout_da = [atlite.Cutout(c, chunks=chunks).data for c in cutout_files]
+        cutout_da = [atlite.Cutout(c).data for c in cutout_files]
         combined_data = xr.concat(cutout_da, dim="time", data_vars="minimal")
         cutout = atlite.Cutout(NamedTemporaryFile().name, data=combined_data)
 
@@ -1062,17 +1033,6 @@ def load_cutout(
         cutout.data = cutout.data.sel(time=time)
 
     return cutout
-
-
-def setup_dask(nprocesses: int) -> dict:
-    if nprocesses > 1:
-        cluster = LocalCluster(n_workers=nprocesses, threads_per_worker=1)
-        client = Client(cluster)
-        atexit.register(client.shutdown)
-    else:
-        client = None
-
-    return dict(scheduler=client)
 
 
 def load_costs(cost_file: str) -> pd.DataFrame:
@@ -1091,102 +1051,3 @@ def load_costs(cost_file: str) -> pd.DataFrame:
     """
 
     return pd.read_csv(cost_file, index_col=0)
-
-
-def _simplify_polys(
-    polys, minarea=100 * 1e6, maxdistance=None, tolerance=None, filterremote=True
-):  # 100*1e6 = 100 km² if CRS is DISTANCE_CRS
-    from shapely.geometry import MultiPolygon
-
-    if isinstance(polys, MultiPolygon):
-        polys = sorted(polys.geoms, key=attrgetter("area"), reverse=True)
-        mainpoly = polys[0]
-        mainlength = np.sqrt(mainpoly.area / (2.0 * np.pi))
-
-        if maxdistance is not None:
-            mainlength = maxdistance
-
-        if mainpoly.area > minarea:
-            polys = MultiPolygon(
-                [
-                    p
-                    for p in takewhile(lambda p: p.area > minarea, polys)
-                    if not filterremote or (mainpoly.distance(p) < mainlength)
-                ]
-            )
-        else:
-            polys = mainpoly
-    if tolerance is not None:
-        polys = polys.simplify(tolerance=tolerance)
-    return polys
-
-
-@lru_cache
-def load_data_versions(*files: Path) -> pd.DataFrame:
-    """
-    Load data versions from multiple CSV or YAML files and combine them into a single DataFrame.
-
-    Parameters
-    ----------
-    *files : Path
-        Paths to the CSV or YAML files containing data version information.
-
-    Returns
-    -------
-    pd.DataFrame
-        Combined DataFrame containing the data version information from all files, with, optionally, columns for each tag.
-    """
-    data_versions_list = [
-        _load_data_version(file).set_index(["dataset", "version", "source"])
-        for file in files
-    ]
-    combined_data_versions = pd.concat(data_versions_list)
-
-    deduplicated_data_versions = (
-        combined_data_versions.loc[
-            ~combined_data_versions.index.duplicated(keep="last")
-        ]
-        .sort_index()
-        .reset_index()
-    )
-
-    # Turn space-separated tags into individual columns
-    deduplicated_data_versions["tags"] = deduplicated_data_versions["tags"].str.split()
-    exploded = deduplicated_data_versions.explode("tags")
-    dummies = pd.get_dummies(exploded["tags"], dtype=bool)
-    tags_matrix = dummies.groupby(dummies.index).max()
-    deduplicated_data_versions = deduplicated_data_versions.join(tags_matrix)
-
-    return deduplicated_data_versions
-
-
-def _load_data_version(file: str | Path, validate: bool = True) -> pd.DataFrame:
-    """
-    Load data versions from a CSV or YAML file.
-
-    Parameters
-    ----------
-    file : str
-        Path to the CSV or YAML file containing data version information.
-    validate : bool, default True
-        If True, validate the loaded data against the VersionsSchema.
-
-    Returns
-    -------
-    pd.DataFrame
-        DataFrame containing the data version information, with, optionally, columns for each tag.
-    """
-    if (file_path := Path(file)).suffix.lower() in [".yaml", ".yml"]:
-        data_versions = pd.DataFrame(yaml.safe_load(file_path.read_text()))
-    else:
-        data_versions = pd.read_csv(
-            file_path,
-            dtype=str,
-            na_filter=False,
-            delimiter=",",
-            comment="#",
-        )
-    if validate:
-        data_versions = VersionsSchema.validate(data_versions)
-
-    return data_versions

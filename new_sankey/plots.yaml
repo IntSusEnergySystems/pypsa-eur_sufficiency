@@ -1,0 +1,14 @@
+Sepia_plots:
+ CO2 emissions by sector: false
+ CO2 emissions by source: false
+ Cumulative CO2 emissions by sector: false
+ Cumulative CO2 emissions by source: false
+ Sankey diagram: true
+ Carbon Sankey diagram: false
+ Renewable energy share: false
+ Final energy consumption by origin: false
+ Share of domestic production: false
+ Final energy consumption by each sector: false
+ Mix of secondary energies: false
+ Final energy consumption by carrier for each sector: false
+

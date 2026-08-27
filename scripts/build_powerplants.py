@@ -5,72 +5,72 @@
 
 """
 Retrieves conventional powerplant capacities and locations from
-[powerplantmatching](https://github.com/PyPSA/powerplantmatching), assigns
-these to buses and creates a `.csv` file. It is possible to amend the
+`powerplantmatching <https://github.com/PyPSA/powerplantmatching>`_, assigns
+these to buses and creates a ``.csv`` file. It is possible to amend the
 powerplant database with custom entries provided in
-`data/custom_powerplants.csv`.
+``data/custom_powerplants.csv``.
 Lastly, for every substation, powerplants with zero-initial capacity can be added for certain fuel types automatically.
 
 Outputs
 -------
 
-- `resource/powerplants_s_{clusters}.csv`: A list of conventional power plants (i.e. neither wind nor solar) with fields for name, fuel type, technology, country, capacity in MW, duration, commissioning year, retrofit year, latitude, longitude, and dam information as documented in the [powerplantmatching README](https://github.com/PyPSA/powerplantmatching/blob/master/README.md); additionally it includes information on the closest substation/bus in `networks/base_s_{clusters}.nc`.
+- ``resource/powerplants_s_{clusters}.csv``: A list of conventional power plants (i.e. neither wind nor solar) with fields for name, fuel type, technology, country, capacity in MW, duration, commissioning year, retrofit year, latitude, longitude, and dam information as documented in the `powerplantmatching README <https://github.com/PyPSA/powerplantmatching/blob/master/README.md>`_; additionally it includes information on the closest substation/bus in ``networks/base_s_{clusters}.nc``.
 
-    ![](img/powerplantmatching.png)
+    .. image:: img/powerplantmatching.png
+        :scale: 30 %
 
-    **Source:** [powerplantmatching on GitHub](https://github.com/PyPSA/powerplantmatching)
+    **Source:** `powerplantmatching on GitHub <https://github.com/PyPSA/powerplantmatching>`_
 
 Description
 -----------
 
-The configuration options `electricity: powerplants_filter` and `electricity: custom_powerplants` can be used to control whether data should be retrieved from the original powerplants database or from custom amendments. These specify [pandas.query](https://pandas.pydata.org/pandas-docs/stable/reference/api/pandas.DataFrame.query.html) commands.
-In addition the configuration option `electricity: everywhere_powerplants` can be used to place powerplants with zero-initial capacity of certain fuel types at all substations.
+The configuration options ``electricity: powerplants_filter`` and ``electricity: custom_powerplants`` can be used to control whether data should be retrieved from the original powerplants database or from custom amendments. These specify `pandas.query <https://pandas.pydata.org/pandas-docs/stable/reference/api/pandas.DataFrame.query.html>`_ commands.
+In addition the configuration option ``electricity: everywhere_powerplants`` can be used to place powerplants with zero-initial capacity of certain fuel types at all substations.
 
 1. Adding all powerplants from custom:
 
-    ```yaml
-    powerplants_filter: false
-    custom_powerplants: true
-    ```
+    .. code:: yaml
+
+        powerplants_filter: false
+        custom_powerplants: true
 
 2. Replacing powerplants in e.g. Germany by custom data:
 
-    ```yaml
-    powerplants_filter: Country not in ['Germany']
-    custom_powerplants: true
-    ```
+    .. code:: yaml
+
+        powerplants_filter: Country not in ['Germany']
+        custom_powerplants: true
 
     or
 
-    ```yaml
-    powerplants_filter: Country not in ['Germany']
-    custom_powerplants: Country in ['Germany']
-    ```
+    .. code:: yaml
+
+        powerplants_filter: Country not in ['Germany']
+        custom_powerplants: Country in ['Germany']
 
 
 3. Adding additional built year constraints:
 
-    ```yaml
-    powerplants_filter: Country not in ['Germany'] and YearCommissioned <= 2015
-    custom_powerplants: YearCommissioned <= 2015
-    ```
+    .. code:: yaml
+
+        powerplants_filter: Country not in ['Germany'] and YearCommissioned <= 2015
+        custom_powerplants: YearCommissioned <= 2015
 
 4. Adding powerplants at all substations for 4 conventional carrier types:
 
-    ```yaml
-    everywhere_powerplants: ['Natural Gas', 'Coal', 'nuclear', 'OCGT']
-    ```
+    .. code:: yaml
+
+        everywhere_powerplants: ['Natural Gas', 'Coal', 'nuclear', 'OCGT']
 """
 
 import itertools
 import logging
 
-import geopandas as gpd
 import numpy as np
 import pandas as pd
 import powerplantmatching as pm
 import pypsa
-from shapely.geometry import MultiPolygon, Polygon
+from powerplantmatching.export import map_country_bus
 
 from scripts._helpers import configure_logging, set_scenario_config
 
@@ -137,89 +137,22 @@ def replace_natural_gas_technology(df):
     return df.Technology.mask(df.Fueltype == "Natural Gas", tech)
 
 
-def replace_natural_gas_fueltype(df: pd.DataFrame) -> pd.Series:
+def replace_natural_gas_fueltype(df):
     return df.Fueltype.mask(
         (df.Technology == "OCGT") | (df.Technology == "CCGT"), "Natural Gas"
     )
-
-
-def fill_unoccupied_holes(gdf: gpd.GeoDataFrame) -> gpd.GeoSeries:
-    def _fill_poly(poly, idx):
-        if not poly.interiors:
-            return poly
-        kept = [h for h in poly.interiors if gdf.drop(idx).intersects(Polygon(h)).any()]
-        return Polygon(poly.exterior, kept)
-
-    result = gdf.geometry.copy()
-    for idx in gdf.index:
-        g = gdf.geometry[idx]
-        if g.geom_type == "Polygon":
-            result[idx] = _fill_poly(g, idx)
-        elif g.geom_type == "MultiPolygon":
-            result[idx] = MultiPolygon([_fill_poly(p, idx) for p in g.geoms])
-    return result
-
-
-def map_to_country_bus(
-    ppl: gpd.GeoDataFrame, regions: gpd.GeoDataFrame, max_distance: float = 10000
-) -> gpd.GeoDataFrame:
-    """
-    Assign power plants to region buses of the same country.
-
-    First, spatial join is performed per country to avoid cross-border
-    misassignment. Remaining unmatched plants are assigned via nearest
-    neighbor (max 10000m) within the same country.
-    """
-    assigned = []
-    unmatched = []
-
-    for country, plants in ppl.groupby("Country"):
-        country_regions = regions[regions.index.str[:2] == country]
-        joined = (
-            plants.sjoin(country_regions)
-            .rename(columns={"name": "bus"})
-            .reindex(plants.index)
-        )
-        assigned.append(joined.dropna(subset=["bus"]))
-        missing = joined[joined["bus"].isna()]
-        if not missing.empty:
-            unmatched.append(plants.loc[missing.index])
-
-    if unmatched:
-        unmatched = pd.concat(unmatched)
-        for country, plants in unmatched.groupby("Country"):
-            country_regions = regions[regions.index.str[:2] == country]
-            nearest = (
-                plants.to_crs(3035)
-                .sjoin_nearest(country_regions.to_crs(3035), max_distance=max_distance)
-                .rename(columns={"name": "bus"})
-                .to_crs(4326)
-            )
-            missing = plants.index.difference(nearest.index)
-            print(country, missing)
-            nearest = pd.concat([nearest, plants.loc[missing]])
-            assigned.append(nearest)
-
-    return pd.concat(assigned)
 
 
 if __name__ == "__main__":
     if "snakemake" not in globals():
         from scripts._helpers import mock_snakemake
 
-        snakemake = mock_snakemake("build_powerplants", clusters=256)
+        snakemake = mock_snakemake("build_powerplants")
     configure_logging(snakemake)
     set_scenario_config(snakemake)
 
     n = pypsa.Network(snakemake.input.network)
     countries = snakemake.params.countries
-
-    fn_onshore = snakemake.input.regions_onshore
-    fn_offshore = snakemake.input.regions_offshore
-
-    regions = pd.concat([gpd.read_file(fn_onshore), gpd.read_file(fn_offshore)])
-    regions = regions.dissolve("name")
-    regions["geometry"] = fill_unoccupied_holes(regions)
 
     # Steps copied from PPM: Usually run by PPM when using pm.powerplants(...) from cache
     ppl = (
@@ -228,12 +161,23 @@ if __name__ == "__main__":
         .pipe(pm.collection.set_column_name, "Matched Data")
     )
     ppl = (
-        ppl.powerplant.convert_country_to_alpha2()
-        .query("Country in @countries")
+        ppl.powerplant.fill_missing_decommissioning_years()
+        .powerplant.convert_country_to_alpha2()
+        .query('Fueltype not in ["Solar", "Wind"] and Country in @countries')
         .assign(Technology=replace_natural_gas_technology)
         .assign(Fueltype=replace_natural_gas_fueltype)
         .replace({"Solid Biomass": "Bioenergy", "Biogas": "Bioenergy"})
     )
+
+    # Correct bioenergy for countries where possible
+    opsd = pm.data.OPSD_VRE().powerplant.convert_country_to_alpha2()
+    opsd = opsd.replace({"Solid Biomass": "Bioenergy", "Biogas": "Bioenergy"}).query(
+        'Country in @countries and Fueltype == "Bioenergy"'
+    )
+    opsd["Name"] = "Biomass"
+    available_countries = opsd.Country.unique()
+    ppl = ppl.query('not (Country in @available_countries and Fueltype == "Bioenergy")')
+    ppl = pd.concat([ppl, opsd])
 
     ppl_query = snakemake.params.powerplants_filter
     if isinstance(ppl_query, str):
@@ -254,23 +198,18 @@ if __name__ == "__main__":
     )
 
     ppl = ppl.dropna(subset=["lat", "lon"])
-
-    ppl = gpd.GeoDataFrame(ppl, geometry=gpd.points_from_xy(ppl.lon, ppl.lat), crs=4326)
-
-    ppl = map_to_country_bus(ppl, regions)
+    ppl = map_country_bus(ppl, n.buses)
 
     bus_null_b = ppl["bus"].isnull()
     if bus_null_b.any():
-        stats = (
-            ppl.loc[bus_null_b]
-            .groupby(by=["Country", "Fueltype"])
-            .Capacity.sum()
-            .sort_values(ascending=False)
-        )
         logger.warning(
-            f"Couldn't assign sufficiently close region for {bus_null_b.sum()} powerplants.\n"
-            f"Removing the following capacities (MW) from the powerplants dataset:\n {stats}"
+            f"Couldn't find close bus for {bus_null_b.sum()} powerplants. "
+            "Removing them from the powerplants list."
         )
         ppl = ppl[~bus_null_b]
+
+    # TODO: This has to fixed in PPM, some powerplants are still duplicated
+    cumcount = ppl.groupby(["bus", "Fueltype"]).cumcount() + 1
+    ppl.Name = ppl.Name.where(cumcount == 1, ppl.Name + " " + cumcount.astype(str))
 
     ppl.reset_index(drop=True).to_csv(snakemake.output[0])

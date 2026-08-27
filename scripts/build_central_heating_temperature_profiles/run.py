@@ -14,13 +14,12 @@ By default, `max_forward_temperature` from Euroheat DHC Market Outlook 2024 is u
 Relevant Settings
 -----------------
 
-```yaml
-sector:
-    district_heating:
-        max_forward_temperature:
-        min_forward_temperature:
-        return_temperature:
-```
+.. code:: yaml
+    sector:
+        district_heating:
+            max_forward_temperature:
+            min_forward_temperature:
+            return_temperature:
 Inputs
 ------
 - `resources/<run_name>/temp_air_total`: Air temperature

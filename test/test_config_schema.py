@@ -13,22 +13,7 @@ import pytest
 from scripts.lib.validation.config import (
     generate_config_defaults,
     generate_config_schema,
-    validate_config,
 )
-
-
-@pytest.fixture(scope="module")
-def config_file():
-    config = validate_config({})
-    config_filename = Path(f"config/config.{config._name}.yaml")
-    return config_filename
-
-
-@pytest.fixture(scope="module")
-def schema_file():
-    config = validate_config({})
-    schema_filename = Path(f"config/schema.{config._name}.json")
-    return schema_filename
 
 
 def _check_file_in_sync(existing_path: Path, generate_func, file_type: str):
@@ -63,29 +48,25 @@ def _check_file_in_sync(existing_path: Path, generate_func, file_type: str):
         print("=" * 80)
         pytest.fail(
             f"{existing_path} is out of sync with the Pydantic schema. "
-            "Run `pixi run generate-config` to update. See diff above."
+            "Run 'pixi run generate-config' to update. See diff above."
         )
 
 
-def test_config_default_yaml_in_sync(config_file, pytestconfig):
+def test_config_default_yaml_in_sync():
     """Test that config/config.default.yaml is in sync with Pydantic schema."""
-    fix = pytestconfig.getoption("fix")
-    if fix:
-        generate_config_defaults(config_file.as_posix())
+
     _check_file_in_sync(
-        config_file,
+        Path("config/config.default.yaml"),
         generate_config_defaults,
         "yaml",
     )
 
 
-def test_config_schema_json_in_sync(schema_file, pytestconfig):
-    """Test that config/schema.default.json is in sync with Pydantic schema."""
-    fix = pytestconfig.getoption("fix")
-    if fix:
-        generate_config_schema(schema_file.as_posix())
+def test_config_schema_json_in_sync():
+    """Test that config/schema.json is in sync with Pydantic schema."""
+
     _check_file_in_sync(
-        schema_file,
+        Path("config/schema.json"),
         generate_config_schema,
         "json",
     )

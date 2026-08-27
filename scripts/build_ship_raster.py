@@ -2,15 +2,18 @@
 #
 # SPDX-License-Identifier: MIT
 """
-Transforms the global ship density data from the [World Bank Data Catalogue.](https://datacatalog.worldbank.org/search/dataset/0037580/Global-Shipping-Traffic-Density)
+Transforms the global ship density data from the `World Bank Data Catalogue.
+
+<https://datacatalog.worldbank.org/search/dataset/0037580/Global-Shipping-Traffic-Density>`_
 to the size of the considered cutout. The global ship density raster is later
 used for the exclusion when calculating the offshore potentials.
 
 Outputs
 -------
 
-- `resources/europe_shipdensity_raster.nc`: Reduced version of global shipping
-  traffic density from [World Bank Data Catalogue](https://datacatalog.worldbank.org/search/dataset/0037580/) to reduce
+- ``resources/europe_shipdensity_raster.nc``: Reduced version of global shipping
+  traffic density from `World Bank Data Catalogue
+  <https://datacatalog.worldbank.org/search/dataset/0037580/>`_ to reduce
   computation time.
 
 Description

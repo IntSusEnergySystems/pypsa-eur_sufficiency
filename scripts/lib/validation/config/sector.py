@@ -231,7 +231,6 @@ class _TransmissionEfficiencyConfig(BaseModel):
         default_factory=lambda: [
             "DC",
             "H2 pipeline",
-            "H2 pipeline retrofitted",
             "gas pipeline",
             "electricity distribution grid",
         ],
@@ -251,14 +250,6 @@ class _TransmissionEfficiencyConfig(BaseModel):
         },
         alias="H2 pipeline",
         description="H2 pipeline transmission efficiency.",
-    )
-    H2_pipeline_retrofitted: dict[str, float] = Field(
-        default_factory=lambda: {
-            "efficiency_per_1000km": 1,
-            "compression_per_1000km": 0.018,
-        },
-        alias="H2 pipeline retrofitted",
-        description="H2 pipeline retrofitted transmission efficiency.",
     )
     gas_pipeline: dict[str, float] = Field(
         default_factory=lambda: {
@@ -452,8 +443,7 @@ class SectorConfig(BaseModel):
         description="The share for battery electric vehicles (BEV) that are able to do demand side management (DSM).",
     )
     bev_energy: float = Field(
-        0.05,
-        description="The average available net battery capacity of battery electric vehicles (BEV) in MWh.",
+        0.05, description="The average size of battery electric vehicles (BEV) in MWh."
     )
     bev_charge_efficiency: float = Field(
         0.9,
@@ -538,6 +528,19 @@ class SectorConfig(BaseModel):
     agriculture_machinery_electric_efficiency: float = Field(
         0.3,
         description="The efficiency of oil-powered machinery in the conversion of oil to meet agricultural needs.",
+    )
+
+    MWh_MeOH_per_MWh_H2: float = Field(
+        0.8787,
+        description="The energy amount of the produced methanol per energy amount of hydrogen. From `DECHEMA (2017) <https://dechema.de/dechema_media/Downloads/Positionspapiere/Technology_study_Low_carbon_energy_and_feedstock_for_the_European_chemical_industry-p-20002750.pdf>`_, page 64.",
+    )
+    MWh_MeOH_per_tCO2: float = Field(
+        4.0321,
+        description="The energy amount of the produced methanol per ton of CO2. From `DECHEMA (2017) <https://dechema.de/dechema_media/Downloads/Positionspapiere/Technology_study_Low_carbon_energy_and_feedstock_for_the_European_chemical_industry-p-20002750.pdf>`_, page 66.",
+    )
+    MWh_MeOH_per_MWh_e: float = Field(
+        3.6907,
+        description="The energy amount of the produced methanol per energy amount of electricity. From `DECHEMA (2017) <https://dechema.de/dechema_media/Downloads/Positionspapiere/Technology_study_Low_carbon_energy_and_feedstock_for_the_European_chemical_industry-p-20002750.pdf>`_, page 64.",
     )
 
     shipping_hydrogen_liquefaction: bool = Field(
@@ -716,6 +719,7 @@ class SectorConfig(BaseModel):
         default_factory=lambda: {
             "enable": True,
             "attribute": [
+                "conservative estimate Mt",
                 "conservative estimate GAS Mt",
                 "conservative estimate OIL Mt",
                 "conservative estimate aquifer Mt",
@@ -725,7 +729,7 @@ class SectorConfig(BaseModel):
             "max_size": 25,
             "years_of_storage": 25,
         },
-        description="Add option for regionally-resolved geological carbon dioxide sequestration potentials based on `CO2StoP <https://setis.ec.europa.eu/european-co2-storage-database_en>`_.Note that 'conservative estimate Mt' is not a summary of gas/oil fields and aquifers but contains storage potential for geological reservoirs suitable for CO2 storage excluding those. The more conservative assumption is to only include the three attributes mentioned above.",
+        description="Add option for regionally-resolved geological carbon dioxide sequestration potentials based on `CO2StoP <https://setis.ec.europa.eu/european-co2-storage-database_en>`_.",
     )
     co2_sequestration_potential: dict[int, float] = Field(
         default_factory=lambda: {
@@ -757,24 +761,11 @@ class SectorConfig(BaseModel):
         1,
         description="The cost factor for the capital cost of the carbon dioxide transmission network.",
     )
-    co2_network_liquefaction: bool = Field(
-        False,
-        description="Add option for including compressor stations with investment costs and electricity demand for liquefaction step for carbon dioxide before transport.",
-    )
     cc_fraction: float = Field(
         0.9,
         description="The default fraction of CO2 captured with post-combustion capture.",
     )
-    cc_capital_cost_factor: dict[str, float] = Field(
-        default_factory=lambda: {
-            "gas": 2.0,
-            "biomass": 1.1,
-            "coal": 1.1,
-            "waste": 1.2,
-            "cement": 1.0,
-        },
-        description="Size of the carbon capture unit depending on the amount of carbon dioxide in the flue gas. The more CO2, the smaller the capture unit and thus the lower the capital cost factor. Factors are given relative to cement capture. The default values are based on the DEA technology-data report on carbon capture, transport and storage Table 8 / Figure 12 (https://ens.dk/en/analyses-and-statistics/technology-data-carbon-capture-transport-and-storage).",
-    )
+
     hydrogen_underground_storage: bool = Field(
         True,
         description="Add options for storing hydrogen underground. Storage potential depends regionally.",

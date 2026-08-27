@@ -14,10 +14,10 @@ includes near-surface depths (5-15m) suitable for heat pump applications.
 Relevant Settings
 -----------------
 
-```yaml
-# No specific configuration required
-# Uses year wildcard from Snakemake rule
-```
+.. code:: yaml
+
+    # No specific configuration required
+    # Uses year wildcard from Snakemake rule
 
 Inputs
 ------

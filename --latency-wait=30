@@ -1,0 +1,95 @@
+host: nic5-login1
+Building DAG of jobs...
+Job stats:
+job                            count
+---------------------------  -------
+add_brownfield                     2
+solve_sector_network_myopic        3
+solve_sector_networks              1
+total                              6
+
+
+[Wed Feb 11 14:15:12 2026]
+Solving sector-coupled network with myopic foresight for 33 clusters, 2030 planning horizons,  electric options and  sector options
+rule solve_sector_network_myopic:
+    input: resources/ref/networks/base_s_33___2030_brownfield.nc, resources/ref/co2_totals_s_33_2030.csv
+    output: results/ref/networks/base_s_33___2030.nc, results/ref/configs/config.base_s_33___2030.yaml
+    log: results/ref/logs/base_s_33___2030_solver.log, results/ref/logs/base_s_33___2030_memory.log, results/ref/logs/base_s_33___2030_python.log
+    jobid: 1
+    benchmark: results/ref/benchmarks/solve_sector_network/base_s_33___2030
+    reason: Code has changed since last execution
+    wildcards: clusters=33, opts=, sector_opts=, planning_horizons=2030
+    resources: mem_mb=900000, mem_mib=858307, disk_mb=<TBD>, tmpdir=<TBD>, slurm_account=<TBD>, slurm_partition=<TBD>, runtime=2833, ncpus=16
+[Wed Feb 11 14:15:12 2026]
+Adding brownfield constraints for existing infrastructure for 33 clusters, 2040 planning horizons,  electric options and  sector options
+rule add_brownfield:
+    input: resources/ref/profile_33_solar.nc, resources/ref/profile_33_solar-hsat.nc, resources/ref/profile_33_onwind.nc, resources/ref/profile_33_offwind-ac.nc, resources/ref/profile_33_offwind-dc.nc, resources/ref/profile_33_offwind-float.nc, resources/ref/networks/base_s_33___2040.nc, results/ref/networks/base_s_33___2030.nc
+    output: resources/ref/networks/base_s_33___2040_brownfield.nc
+    log: logs/ref/add_brownfield_base_s_33___2040.log
+    jobid: 112
+    benchmark: benchmarks/ref/add_brownfield/base_s_33___2040
+    reason: Input files updated by another job: results/ref/networks/base_s_33___2030.nc
+    wildcards: clusters=33, opts=, sector_opts=, planning_horizons=2040
+    resources: mem_mb=10000, mem_mib=9537, disk_mb=<TBD>, tmpdir=<TBD>, slurm_account=<TBD>, slurm_partition=<TBD>
+[Wed Feb 11 14:15:12 2026]
+Solving sector-coupled network with myopic foresight for 33 clusters, 2040 planning horizons,  electric options and  sector options
+rule solve_sector_network_myopic:
+    input: resources/ref/networks/base_s_33___2040_brownfield.nc, resources/ref/co2_totals_s_33_2040.csv
+    output: results/ref/networks/base_s_33___2040.nc, results/ref/configs/config.base_s_33___2040.yaml
+    log: results/ref/logs/base_s_33___2040_solver.log, results/ref/logs/base_s_33___2040_memory.log, results/ref/logs/base_s_33___2040_python.log
+    jobid: 111
+    benchmark: results/ref/benchmarks/solve_sector_network/base_s_33___2040
+    reason: Input files updated by another job: resources/ref/networks/base_s_33___2040_brownfield.nc
+    wildcards: clusters=33, opts=, sector_opts=, planning_horizons=2040
+    resources: mem_mb=900000, mem_mib=858307, disk_mb=<TBD>, tmpdir=<TBD>, slurm_account=<TBD>, slurm_partition=<TBD>, runtime=2833, ncpus=16
+[Wed Feb 11 14:15:12 2026]
+Adding brownfield constraints for existing infrastructure for 33 clusters, 2050 planning horizons,  electric options and  sector options
+rule add_brownfield:
+    input: resources/ref/profile_33_solar.nc, resources/ref/profile_33_solar-hsat.nc, resources/ref/profile_33_onwind.nc, resources/ref/profile_33_offwind-ac.nc, resources/ref/profile_33_offwind-dc.nc, resources/ref/profile_33_offwind-float.nc, resources/ref/networks/base_s_33___2050.nc, results/ref/networks/base_s_33___2040.nc
+    output: resources/ref/networks/base_s_33___2050_brownfield.nc
+    log: logs/ref/add_brownfield_base_s_33___2050.log
+    jobid: 134
+    benchmark: benchmarks/ref/add_brownfield/base_s_33___2050
+    reason: Input files updated by another job: results/ref/networks/base_s_33___2040.nc
+    wildcards: clusters=33, opts=, sector_opts=, planning_horizons=2050
+    resources: mem_mb=10000, mem_mib=9537, disk_mb=<TBD>, tmpdir=<TBD>, slurm_account=<TBD>, slurm_partition=<TBD>
+[Wed Feb 11 14:15:12 2026]
+Solving sector-coupled network with myopic foresight for 33 clusters, 2050 planning horizons,  electric options and  sector options
+rule solve_sector_network_myopic:
+    input: resources/ref/networks/base_s_33___2050_brownfield.nc, resources/ref/co2_totals_s_33_2050.csv
+    output: results/ref/networks/base_s_33___2050.nc, results/ref/configs/config.base_s_33___2050.yaml
+    log: results/ref/logs/base_s_33___2050_solver.log, results/ref/logs/base_s_33___2050_memory.log, results/ref/logs/base_s_33___2050_python.log
+    jobid: 133
+    benchmark: results/ref/benchmarks/solve_sector_network/base_s_33___2050
+    reason: Missing output files: results/ref/networks/base_s_33___2050.nc; Input files updated by another job: resources/ref/networks/base_s_33___2050_brownfield.nc
+    wildcards: clusters=33, opts=, sector_opts=, planning_horizons=2050
+    resources: mem_mb=900000, mem_mib=858307, disk_mb=<TBD>, tmpdir=<TBD>, slurm_account=<TBD>, slurm_partition=<TBD>, runtime=2833, ncpus=16
+[Wed Feb 11 14:15:12 2026]
+Collecting solved sector-coupled network files
+rule solve_sector_networks:
+    input: results/ref/networks/base_s_33___2030.nc, results/ref/networks/base_s_33___2040.nc, results/ref/networks/base_s_33___2050.nc
+    jobid: 0
+    reason: Input files updated by another job: results/ref/networks/base_s_33___2030.nc, results/ref/networks/base_s_33___2040.nc, results/ref/networks/base_s_33___2050.nc
+    resources: mem_mb=<TBD>, disk_mb=<TBD>, tmpdir=<TBD>, slurm_account=<TBD>, slurm_partition=<TBD>
+Job stats:
+job                            count
+---------------------------  -------
+add_brownfield                     2
+solve_sector_network_myopic        3
+solve_sector_networks              1
+total                              6
+
+Reasons:
+    (check individual jobs above for details)
+    code has changed since last execution:
+        solve_sector_network_myopic
+    input files updated by another job:
+        add_brownfield, solve_sector_network_myopic, solve_sector_networks
+    output files have to be generated:
+        solve_sector_network_myopic
+Some jobs were triggered by provenance information, see 'reason' section in the rule displays above.
+If you prefer that only modification time is used to determine whether a job shall be executed, use the command line option '--rerun-triggers mtime' (also see --help).
+If you are sure that a change for a certain output file (say, <outfile>) won't change the result (e.g. because you just changed the formatting of a script or environment definition), you can also wipe its metadata to skip such a trigger via 'snakemake --cleanup-metadata <outfile>'. 
+Rules with provenance triggered jobs: solve_sector_network_myopic
+
+This was a dry-run (flag -n). The order of jobs does not reflect the order of execution.

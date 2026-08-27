@@ -4,7 +4,7 @@
 """
 Approximate heat demand for all weather years.
 
-`approximate_heat_demand` approximates annual heat demand based on energy totals and heating degree days (HDD) using a regression of heat demand on HDDs.
+:func:`approximate_heat_demand` approximates annual heat demand based on energy totals and heating degree days (HDD) using a regression of heat demand on HDDs.
 
 Outputs
 -------

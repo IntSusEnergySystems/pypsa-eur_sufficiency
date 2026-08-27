@@ -4,11 +4,13 @@
 """
 Build time series for air and soil temperatures per clustered model region.
 
-Uses `atlite.Cutout.temperature` and `atlite.Cutout.soil_temperature compute temperature ambient air and soil temperature for the respective cutout. The rule is executed in `build_sector.smk``.
+Uses ``atlite.Cutout.temperature`` and ``atlite.Cutout.soil_temperature compute temperature ambient air and soil temperature for the respective cutout. The rule is executed in ``build_sector.smk``.
 
 
-!!! info "See also"
-    [Atlite.Cutout.temperature](https://atlite.readthedocs.io/en/master/ref_api.html#module-atlite.convert) [Atlite.Cutout.soil_temperature](https://atlite.readthedocs.io/en/master/ref_api.html#module-atlite.convert)
+.. seealso::
+    `Atlite.Cutout.temperature <https://atlite.readthedocs.io/en/master/ref_api.html#module-atlite.convert>`_
+    `Atlite.Cutout.soil_temperature <https://atlite.readthedocs.io/en/master/ref_api.html#module-atlite.convert>`_
+
 """
 
 import logging
@@ -16,13 +18,13 @@ import logging
 import geopandas as gpd
 import numpy as np
 import xarray as xr
+from dask.distributed import Client, LocalCluster
 
 from scripts._helpers import (
     configure_logging,
     get_snapshots,
     load_cutout,
     set_scenario_config,
-    setup_dask,
 )
 
 logger = logging.getLogger(__name__)
@@ -39,7 +41,8 @@ if __name__ == "__main__":
     set_scenario_config(snakemake)
 
     nprocesses = int(snakemake.threads)
-    dask_kwargs = setup_dask(nprocesses)
+    cluster = LocalCluster(n_workers=nprocesses, threads_per_worker=1)
+    client = Client(cluster, asynchronous=True)
 
     time = get_snapshots(snakemake.params.snapshots, snakemake.params.drop_leap_day)
 
@@ -63,7 +66,7 @@ if __name__ == "__main__":
     temp_air = cutout.temperature(
         matrix=M_tilde.T,
         index=clustered_regions.index,
-        dask_kwargs=dask_kwargs,
+        dask_kwargs=dict(scheduler=client),
         show_progress=False,
     )
 
@@ -72,7 +75,7 @@ if __name__ == "__main__":
     temp_soil = cutout.soil_temperature(
         matrix=M_tilde.T,
         index=clustered_regions.index,
-        dask_kwargs=dask_kwargs,
+        dask_kwargs=dict(scheduler=client),
         show_progress=False,
     )
 

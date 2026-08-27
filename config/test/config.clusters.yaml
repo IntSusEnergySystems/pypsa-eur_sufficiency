@@ -1,4 +1,4 @@
-# yaml-language-server: $schema=../schema.default.json
+# yaml-language-server: $schema=../schema.json
 # SPDX-FileCopyrightText: Contributors to PyPSA-Eur <https://github.com/pypsa/pypsa-eur>
 #
 # SPDX-License-Identifier: CC0-1.0
@@ -29,7 +29,7 @@ clustering:
   temporal:
     resolution_elec: 24h
   simplify_network:
-    remove_stubs: false
+    remove_stubs: true
     remove_stubs_across_borders: false
 
 solving:
