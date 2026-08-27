@@ -7,7 +7,7 @@
 #
 # `root` is where the relative paths below resolve; override it on the command
 # line with `--root` if you keep the results elsewhere.
-root: /home/umair/pypsa-eur_master
+root: /home/umair/pypsa-eur_sufficiency
 
 project:
   name: EU sufficiency scenario
