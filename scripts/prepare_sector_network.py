@@ -27,6 +27,8 @@ from pypsa.geo import haversine_pts
 from scripts._helpers import (
     get,
     get_temporal_resolution,
+    is_reference_run,
+    is_sufficiency_run,
 )
 from scripts.add_electricity import (
     attach_storageunits,
@@ -216,6 +218,19 @@ def define_spatial(nodes, options):
 
 
 spatial = SimpleNamespace()
+_run_name = ""
+
+
+def _is_sufficiency() -> bool:
+    return _run_name == "suff" or "sensitivity_analysis" in str(_run_name)
+
+
+def _is_reference() -> bool:
+    return _run_name == "ref"
+
+
+def _cc_extendable() -> bool:
+    return not _is_sufficiency()
 
 
 def determine_emission_sectors(options):
@@ -599,7 +614,7 @@ def add_co2_tracking(
     n.add(
         "Store",
         spatial.co2.nodes,
-        e_nom_extendable=True,
+        e_nom_extendable=_cc_extendable(),
         capital_cost=costs.at["CO2 storage tank", "capital_cost"],
         carrier="co2 stored",
         e_cyclic=True,
@@ -2138,7 +2153,13 @@ def add_EVs(
     efficiency *= cyclic_eff
 
     # Calculate load profile
-    profile = electric_share * p_set.div(efficiency)
+    if _is_sufficiency():
+        p_set = p_set.copy()
+        p_shifted = (p_set + cycling_shift(p_set, 1) + cycling_shift(p_set, 2)) / 3
+        cyclic_eff = p_set.div(p_shifted)
+        profile = electric_share * p_set
+    else:
+        profile = electric_share * p_set.div(efficiency)
 
     # Add EV load
     n.add(
@@ -2269,7 +2290,10 @@ def add_fuel_cell_cars(
     )
 
     # Calculate hydrogen demand profile
-    profile = fuel_cell_share * p_set.div(efficiency)
+    if _is_reference():
+        profile = fuel_cell_share * p_set.div(efficiency)
+    else:
+        profile = fuel_cell_share * p_set
 
     # Add hydrogen load for fuel cell vehicles
     n.add(
@@ -2362,9 +2386,14 @@ def add_ice_cars(
     )
 
     # Calculate oil demand profile
-    profile = ice_share * p_set.div(efficiency).rename(
-        columns=lambda x: x + " land transport oil"
-    )
+    if _is_reference():
+        profile = ice_share * p_set.div(efficiency).rename(
+            columns=lambda x: x + " land transport oil"
+        )
+    else:
+        profile = ice_share * p_set.rename(
+            columns=lambda x: x + " land transport oil"
+        )
 
     if not options["regional_oil_demand"]:
         profile = profile.sum(axis=1).to_frame(name="EU land transport oil")
@@ -2413,6 +2442,8 @@ def add_land_transport(
     spatial,
     investment_year,
     nodes,
+    pop_layout=None,
+    clever_transport_file=None,
 ) -> None:
     """
     Add land transport demand and infrastructure to the network.
@@ -2481,6 +2512,56 @@ def add_land_transport(
 
     # temperature for correction factor for heating/cooling
     temperature = xr.open_dataarray(temp_air_total_file).to_pandas()
+
+    electric_share = shares["electric"]
+    fuel_cell_share = shares["fuel_cell"]
+    ice_share = shares["ice"]
+    if _is_sufficiency() and clever_transport_file and pop_layout is not None:
+        demands = pd.read_csv(clever_transport_file, index_col=0)
+        clever_totals = demands.loc[pop_layout.ct].fillna(0.0)
+        clever_totals.index = pop_layout.index
+        clever_totals = clever_totals.multiply(pop_layout.fraction, axis=0)
+        total_share = clever_totals["Total_Road"]
+        elec_val = clever_totals["Electricity_Road"]
+        hydro_val = clever_totals["hydrogen_road"]
+        electric_share = elec_val / total_share
+        fuel_cell_share = hydro_val / total_share
+        ice_share = (total_share - elec_val - hydro_val) / total_share
+
+    if _is_sufficiency():
+        if electric_share.sum() > 0 if hasattr(electric_share, "sum") else electric_share > 0:
+            add_EVs(
+                n,
+                avail_profile,
+                dsm_profile,
+                p_set,
+                electric_share,
+                number_cars,
+                temperature,
+                spatial,
+                options,
+            )
+        if fuel_cell_share.sum() > 0 if hasattr(fuel_cell_share, "sum") else fuel_cell_share > 0:
+            add_fuel_cell_cars(
+                n=n,
+                p_set=p_set,
+                fuel_cell_share=fuel_cell_share,
+                temperature=temperature,
+                options=options,
+                spatial=spatial,
+            )
+        if ice_share.sum() > 0 if hasattr(ice_share, "sum") else ice_share > 0:
+            add_ice_cars(
+                n,
+                costs,
+                p_set,
+                ice_share,
+                temperature,
+                cf_industry,
+                spatial,
+                options,
+            )
+        return
 
     if shares["electric"] > 0:
         add_EVs(
@@ -2567,7 +2648,10 @@ def build_heat_demand(
 
         heat_demand[name] = (
             heat_demand_shape[name] / heat_demand_shape[name].sum()
-        ).multiply(pop_weighted_energy_totals[f"total {sector} {use}"] * eff) * 1e6
+        ).multiply(
+            pop_weighted_energy_totals[f"total {sector} {use}"]
+            * (1 if _is_sufficiency() else eff)
+        ) * 1e6
         electric_heat_supply[name] = (
             heat_demand_shape[name] / heat_demand_shape[name].sum()
         ).multiply(pop_weighted_energy_totals[f"electricity {sector} {use}"]) * 1e6
@@ -2576,13 +2660,64 @@ def build_heat_demand(
     electric_heat_supply = pd.concat(electric_heat_supply, axis=1)
 
     # subtract from electricity load since heat demand already in heat_demand
-    electric_nodes = n.loads.index[n.loads.carrier == "electricity"]
-    n.loads_t.p_set[electric_nodes] = (
-        n.loads_t.p_set[electric_nodes]
-        - electric_heat_supply.T.groupby(level=1).sum().T[electric_nodes]
-    )
+    if not _is_sufficiency():
+        electric_nodes = n.loads.index[n.loads.carrier == "electricity"]
+        n.loads_t.p_set[electric_nodes] = (
+            n.loads_t.p_set[electric_nodes]
+            - electric_heat_supply.T.groupby(level=1).sum().T[electric_nodes]
+        )
 
     return heat_demand
+
+
+def write_sufficiency_heat_demands(n, pop_weighted_energy_totals, district_heat_share):
+    """Scale country heat loads so annual totals match CLEVER heat demands."""
+    heat = pop_weighted_energy_totals.copy()
+    if heat.index.nlevels == 1:
+        heat["country"] = heat.index.str[:2]
+        heat = heat.groupby("country").sum(numeric_only=True)
+
+    countries = district_heat_share.index
+    weights = n.snapshot_weightings.objective.mean()
+    for country in countries:
+        if country not in heat.index:
+            continue
+        h = heat.loc[country]
+        urban_frac = district_heat_share.loc[country, "urban fraction"]
+        urban_central_frac_tot = h.get("distributed heat residential", 0) + h.get(
+            "distributed heat services", 0
+        )
+        total_heat = (
+            h.get("total residential space", 0)
+            + h.get("total residential water", 0)
+            + h.get("total services space", 0)
+            + h.get("total services water", 0)
+        )
+        if weights:
+            total_heat = total_heat / weights
+        urban_central_frac = urban_central_frac_tot / total_heat if total_heat else 0
+        rur_frac = 1 - urban_frac
+        urb_dec_frac = urban_frac - urban_central_frac
+        heat_categories = [
+            name
+            for name in (
+                f"{country} urban decentral heat",
+                f"{country} rural heat",
+                f"{country} urban central heat",
+            )
+            if name in n.loads_t.p_set.columns
+        ]
+        for heat_demand in heat_categories:
+            if "rural" in heat_demand:
+                target_heat = total_heat * rur_frac
+            elif "urban decentral" in heat_demand:
+                target_heat = total_heat * urb_dec_frac
+            else:
+                target_heat = total_heat * urban_central_frac
+            current = n.loads_t.p_set[heat_demand].sum() / 1e6
+            if current:
+                n.loads_t.p_set[heat_demand] *= target_heat / current
+    return n
 
 
 def add_heat(
@@ -3344,7 +3479,7 @@ def add_heat(
                     bus3="co2 atmosphere",
                     bus4=spatial.co2.df.loc[nodes, "nodes"].values,
                     carrier=f"urban central {fuel} CHP CC",
-                    p_nom_extendable=True,
+                    p_nom_extendable=_cc_extendable(),
                     capital_cost=costs.at["central gas CHP", "capital_cost"]
                     * costs.at["central gas CHP", "efficiency"]
                     + costs.at["biomass CHP capture", "capital_cost"]
@@ -4103,7 +4238,7 @@ def add_biomass(
             bus3="co2 atmosphere",
             bus4=spatial.co2.df.loc[urban_central, "nodes"].values,
             carrier="urban central solid biomass CHP CC",
-            p_nom_extendable=True,
+            p_nom_extendable=_cc_extendable(),
             capital_cost=costs.at[key + " CC", "capital_cost"]
             * costs.at[key + " CC", "efficiency"]
             + costs.at["biomass CHP capture", "capital_cost"]
@@ -4474,7 +4609,7 @@ def add_industry(
         bus3=spatial.co2.nodes,
         bus4=spatial.biomass.industry.locations,
         carrier="solid biomass for industry CC",
-        p_nom_extendable=True,
+        p_nom_extendable=_cc_extendable(),
         capital_cost=costs.at["cement capture", "capital_cost"]
         * costs.at["solid biomass", "CO2 intensity"]
         * options["cc_capital_cost_factor"]["biomass"],
@@ -4532,7 +4667,7 @@ def add_industry(
         bus3=spatial.co2.nodes,
         bus4=spatial.gas.industry.locations,
         carrier="gas for industry CC",
-        p_nom_extendable=True,
+        p_nom_extendable=_cc_extendable(),
         capital_cost=costs.at["cement capture", "capital_cost"]
         * options["cc_capital_cost_factor"]["gas"]
         * costs.at["gas", "CO2 intensity"],
@@ -4564,10 +4699,13 @@ def add_industry(
         unit="MWh_LHV",
     )
 
-    p_set_methanol = (
-        industrial_demand["methanol"].rename(lambda x: x + " industry methanol")
-        / nhours
-    )
+    if _is_sufficiency():
+        p_set_methanol = 0.0
+    else:
+        p_set_methanol = (
+            industrial_demand["methanol"].rename(lambda x: x + " industry methanol")
+            / nhours
+        )
 
     if not options["methanol"]["regional_methanol_demand"]:
         p_set_methanol = p_set_methanol.sum()
@@ -4853,11 +4991,21 @@ def add_industry(
         ]
         if n.loads_t.p_set[loads_i].empty:
             continue
-        factor = (
-            1
-            - industrial_demand.loc[loads_i, "current electricity"].sum()
-            / n.loads_t.p_set[loads_i].sum().sum()
-        )
+        if _is_sufficiency():
+            cols = ["electricity residential", "electricity services", "total rail"]
+            available = [c for c in cols if c in pop_weighted_energy_totals.columns]
+            country_rows = pop_weighted_energy_totals.index[
+                pop_weighted_energy_totals.index.str.startswith(ct)
+            ]
+            sum_result = pop_weighted_energy_totals.loc[country_rows, available].sum().sum()
+            denom = n.loads_t.p_set[loads_i].sum().sum() / 1e6
+            factor = sum_result / denom if denom else 1
+        else:
+            factor = (
+                1
+                - industrial_demand.loc[loads_i, "current electricity"].sum()
+                / n.loads_t.p_set[loads_i].sum().sum()
+            )
         n.loads_t.p_set[loads_i] *= factor
 
     n.add(
@@ -6135,6 +6283,8 @@ def main(
     current_horizon: int,
 ) -> None:
     logger.info("Adding sector components")
+    global _run_name
+    _run_name = str(getattr(params, "run_name", "") or "")
     foresight = params.foresight
 
     options = params.sector
@@ -6251,6 +6401,12 @@ def main(
             spatial=spatial,
             investment_year=current_horizon,
             nodes=spatial.nodes,
+            pop_layout=pop_layout,
+            clever_transport_file=(
+                inputs["clever_transport"]
+                if "clever_transport" in inputs.keys()
+                else None
+            ),
         )
 
     if options["heating"]:
@@ -6423,5 +6579,11 @@ def main(
     )
     if options["cluster_heat_buses"] and not first_year_myopic:
         cluster_heat_buses(n)
+
+    if _is_sufficiency():
+        district_heat_share = pd.read_csv(inputs.district_heat_share, index_col=0)
+        write_sufficiency_heat_demands(
+            n, pop_weighted_energy_totals, district_heat_share
+        )
 
     logger.info("Completed sector components")

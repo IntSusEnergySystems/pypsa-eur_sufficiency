@@ -3,5 +3,7 @@
 # SPDX-License-Identifier: MIT
 
 # See https://snakemake.readthedocs.io/en/stable/executing/cli.html#profiles
-
-logger: pypsa
+#
+# Upstream sets `logger: pypsa` when snakemake-logger-plugin-pypsa is installed.
+# Without that plugin Snakemake 9 rejects the unknown logger name.
+printshellcmds: false

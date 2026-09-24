@@ -15,8 +15,22 @@ import yaml
 path = workflow.source_path("../scripts/_helpers.py")
 sys.path.insert(0, os.path.dirname(path))
 
-from scripts._helpers import load_data_versions
+from scripts._helpers import is_sufficiency_run, load_data_versions
 from snakemake.utils import update_config
+
+
+def clever_energy_inputs(w):
+    """Optional CLEVER CSV inputs used when overlaying sufficiency demands."""
+    if not is_sufficiency_run(config):
+        return {}
+    horizon = w.horizon
+    return dict(
+        clever_residential=f"data/clever_residential_{horizon}.csv",
+        clever_transport=f"data/clever_Transport_{horizon}.csv",
+        clever_agriculture=f"data/clever_Agriculture_{horizon}.csv",
+        clever_tertiary=f"data/clever_Tertairy_{horizon}.csv",
+        clever_macro=f"data/clever_Macro_{horizon}.csv",
+    )
 
 
 def navigate_config(config, keys, default=None):

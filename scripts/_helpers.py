@@ -38,6 +38,21 @@ REGION_COLS = ["geometry", "name", "x", "y", "country"]
 PYPSA_V1 = bool(re.match(r"^1\.\d", pypsa.__version__))
 
 
+def is_sufficiency_run(config: dict | None = None) -> bool:
+    """Return True for the sufficiency scenario and related sensitivity runs."""
+    if config is None:
+        config = {}
+    name = str((config.get("run") or {}).get("name") or "")
+    return name == "suff" or "sensitivity_analysis" in name
+
+
+def is_reference_run(config: dict | None = None) -> bool:
+    """Return True for the reference (efficiency) scenario."""
+    if config is None:
+        config = {}
+    return str((config.get("run") or {}).get("name") or "") == "ref"
+
+
 def strip_if_str(value: Any) -> Any:
     """Return stripped strings while leaving other values unchanged."""
 

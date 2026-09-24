@@ -61,15 +61,17 @@ def get_compose_inputs(w):
             **input_heat_source_power(w),
             **rules.cluster_gas_network.output,
             **rules.build_gas_input_locations.output,
-            pop_weighted_energy_totals=resources("pop_weighted_energy_totals.csv"),
-            pop_weighted_heat_totals=resources("pop_weighted_heat_totals.csv"),
-            shipping_demand=resources("shipping_demand.csv"),
-            transport_demand=resources("transport_demand.csv"),
-            transport_data=resources("transport_data.csv"),
-            avail_profile=resources("avail_profile.csv"),
-            dsm_profile=resources("dsm_profile.csv"),
+            pop_weighted_energy_totals=resources(
+                "pop_weighted_energy_totals_{horizon}.csv"
+            ),
+            pop_weighted_heat_totals=resources("pop_weighted_heat_totals_{horizon}.csv"),
+            shipping_demand=resources("shipping_demand_{horizon}.csv"),
+            transport_demand=resources("transport_demand_{horizon}.csv"),
+            transport_data=resources("transport_data_{horizon}.csv"),
+            avail_profile=resources("avail_profile_{horizon}.csv"),
+            dsm_profile=resources("dsm_profile_{horizon}.csv"),
             heat_dsm_profile=resources("residential_heat_dsm_profile.csv"),
-            co2_totals_name=resources("co2_totals.csv"),
+            co2_totals_name=resources("co2_totals_{horizon}.csv"),
             biomass_potentials=resources("biomass_potentials_{horizon}.csv"),
             h2_cavern=resources("salt_cavern_potentials.csv"),
             clustered_pop_layout=resources("pop_layout.csv"),
@@ -143,6 +145,11 @@ def get_compose_inputs(w):
             ates_potentials=(
                 resources("ates_potentials_{horizon}.csv")
                 if cfg["sector"]["district_heating"]["ates"]["enable"]
+                else []
+            ),
+            clever_transport=(
+                f"data/clever_Transport_{horizon}.csv"
+                if is_sufficiency_run(cfg)
                 else []
             ),
         )
@@ -242,6 +249,7 @@ rule compose_network:
         ),
         co2_budget=config_provider("co2_budget"),
         adjustments=config_provider("adjustments"),
+        run_name=config_provider("run", "name"),
     message:
         "Composing network for horizon {wildcards.horizon}"
     script:

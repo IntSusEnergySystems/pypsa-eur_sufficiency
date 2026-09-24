@@ -1,0 +1,167 @@
+%YAML 1.1
+---
+# Single workflow for this fork: reference (ref) and sufficiency (suff).
+# Loaded by the Snakefile on top of config/config.default.yaml.
+# config/config.yaml, if present, is applied afterwards.
+
+run:
+  name: all
+  scenarios:
+    enable: true
+    file: config/study_scenarios.yaml
+
+foresight: myopic
+
+planning_horizons:
+- 2030
+- 2040
+- 2050
+
+countries:
+- AT
+- BE
+- BG
+- CH
+- CZ
+- DE
+- DK
+- EE
+- ES
+- FI
+- FR
+- GB
+- GR
+- HR
+- HU
+- IE
+- IT
+- LT
+- LU
+- LV
+- NL
+- 'NO'
+- PL
+- PT
+- RO
+- SE
+- SI
+- SK
+
+clustering:
+  cluster_network:
+    n_clusters: 33
+
+solving:
+  solver:
+    name: gurobi
+    options: gurobi-numeric-focus
+  mem_mb: 900000
+  runtime: 48h
+
+self_sufficiency:
+  self_sufficiency_constraint: false
+  level: 0.7
+
+co2_budget:
+  upper:
+    2020: 0.72
+    2025: 0.648
+    2030: 0.45
+    2035: 0.25
+    2040: 0.15
+    2045: 0.05
+    2050: 0.0
+
+co2_budget_national:
+
+  2030:
+    AT: 0.45
+    BG: 0.45
+    CH: 0.45
+    CZ: 0.45
+    DK: 0.45
+    EE: 0.45
+    ES: 0.45
+    FI: 0.45
+    GR: 0.45
+    HR: 0.45
+    HU: 0.45
+    IE: 0.45
+    IT: 0.45
+    LT: 0.45
+    LU: 0.45
+    LV: 0.45
+    'NO': 0.45
+    PL: 0.45
+    PT: 0.45
+    SI: 0.45
+    SE: 0.45
+    SK: 0.45
+    RO: 0.45
+    BE: 0.45
+    DE: 0.45
+    FR: 0.45
+    GB: 0.45
+    NL: 0.45
+  2040:
+    AT: 0.15
+    BG: 0.15
+    CH: 0.15
+    CZ: 0.15
+    DK: 0.15
+    EE: 0.15
+    ES: 0.15
+    FI: 0.15
+    GR: 0.15
+    HR: 0.15
+    HU: 0.15
+    IE: 0.15
+    IT: 0.15
+    LT: 0.15
+    LU: 0.15
+    LV: 0.15
+    'NO': 0.15
+    PL: 0.15
+    PT: 0.15
+    SI: 0.15
+    SE: 0.15
+    SK: 0.15
+    RO: 0.15
+    BE: 0.15
+    DE: 0.15
+    FR: 0.15
+    GB: 0.15
+    NL: 0.15
+  2050:
+    AT: 0.05
+    BG: 0.05
+    CH: 0.05
+    CZ: 0.05
+    DK: 0.05
+    EE: 0.05
+    ES: 0.05
+    FI: 0.05
+    GR: 0.05
+    HR: 0.05
+    HU: 0.05
+    IE: 0.05
+    IT: 0.05
+    LT: 0.05
+    LU: 0.05
+    LV: 0.05
+    'NO': 0.05
+    PL: 0.05
+    PT: 0.05
+    SI: 0.05
+    SE: 0.05
+    SK: 0.05
+    RO: 0.05
+    BE: 0.05
+    DE: 0.05
+    FR: 0.05
+    GB: 0.05
+    NL: 0.05
+sector:
+  co2_budget_national: true
+  dac: false
+  SMR_cc: false

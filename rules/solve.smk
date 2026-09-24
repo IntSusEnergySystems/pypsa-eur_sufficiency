@@ -6,6 +6,11 @@
 rule solve_network:
     input:
         network=resources("networks/composed_{horizon}.nc"),
+        co2_totals_name=lambda w: (
+            resources("co2_totals_{horizon}.csv")
+            if config_provider("sector", "co2_budget_national")(w)
+            else []
+        ),
     output:
         network=RESULTS + "networks/solved_{horizon}.nc",
         model=(

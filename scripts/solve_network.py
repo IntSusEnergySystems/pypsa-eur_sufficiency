@@ -46,6 +46,8 @@ from scripts._helpers import (
     set_scenario_config,
 )
 
+from scripts.prepare_sector_network import determine_emission_sectors
+
 logger = logging.getLogger(__name__)
 
 # Allow for PyPSA versions <0.35
@@ -1224,6 +1226,91 @@ def add_co2_atmosphere_constraint(n, snapshots):
             )
 
 
+def add_co2limit_country(n, limit_countries, nyears=1.0, snakemake=None):
+    """Add national CO2 budget constraints as a fraction of 1990 emissions."""
+    logger.info("Adding national CO2 budget limits as a fraction of 1990 levels")
+    options = n.config["sector"]
+    countries = n.config["countries"]
+    sectors = determine_emission_sectors(options)
+    co2_totals = 1e6 * pd.read_csv(snakemake.input.co2_totals_name, index_col=0)
+    co2_limit_countries = co2_totals.loc[countries, sectors].sum(axis=1)
+    co2_limit_countries = co2_limit_countries.loc[
+        co2_limit_countries.index.isin(limit_countries.keys())
+    ]
+    lulucf = co2_totals.loc[countries, "LULUCF"]
+    lulucf = lulucf.where(lulucf < 0, 0) * -1
+    co2_limit_countries = (
+        co2_limit_countries * co2_limit_countries.index.map(limit_countries) * nyears
+        + lulucf
+    )
+
+    p = n.model["Link-p"]
+    country = n.links.bus1.map(n.buses.location).map(n.buses.country)
+    country_dac = (
+        n.links[n.links.carrier == "DAC"].bus3.map(n.buses.location).map(n.buses.country)
+    )
+    country.loc[country_dac.index] = country_dac
+    for pattern in [
+        "process emissions",
+        "HVC to air",
+        "electrobiofuels",
+        "unsustainable bioliquids",
+        "biomass-to-methanol",
+        "biomass to liquid",
+    ]:
+        source = (
+            n.links[n.links.carrier.str.contains(pattern)]
+            .bus0.map(n.buses.location)
+            .map(n.buses.country)
+        )
+        country.loc[source.index] = source
+    mask = country.isna() | (country == "")
+    country.loc[mask] = country.loc[mask].index.str[:2]
+    country = country[country != "EU"]
+
+    lhs_terms = []
+    for port in [col[3:] for col in n.links if col.startswith("bus")]:
+        if str(port) == "0":
+            efficiency = n.links["efficiency"].apply(lambda x: 1.0).rename("efficiency0")
+        elif str(port) == "1":
+            efficiency = n.links["efficiency"]
+        else:
+            efficiency = n.links[f"efficiency{port}"]
+        mask_port = n.links[f"bus{port}"].map(n.buses.carrier).eq("co2")
+        idx = n.links[mask_port].index
+        exclude = ["EU oil refining", "EU methanol import", "EU oil import"]
+        idx = idx[~np.isin(idx, exclude)]
+        grouping = country.loc[idx.intersection(country.index)]
+        idx = grouping.index
+        if grouping.empty or grouping.isnull().all():
+            continue
+        expr = (
+            (p.loc[:, idx] * efficiency[idx]).groupby(grouping).sum()
+            * n.snapshot_weightings.generators
+        ).sum("snapshot")
+        lhs_terms.append(expr)
+
+    if not lhs_terms:
+        return
+    lhs = sum(lhs_terms)
+    dim = list(lhs.dims)[0]
+    rhs = pd.Series(co2_limit_countries)
+    for ct in lhs.indexes[dim]:
+        if ct not in rhs.index:
+            continue
+        n.model.add_constraints(
+            lhs.sel({dim: ct}) <= rhs[ct],
+            name=f"GlobalConstraint-co2_limit_per_country{ct}",
+        )
+        n.add(
+            "GlobalConstraint",
+            f"co2_limit_per_country{ct}",
+            constant=float(rhs[ct]),
+            sense="<=",
+            type="",
+        )
+
+
 def extra_functionality(
     n: pypsa.Network,
     snapshots: pd.DatetimeIndex,
@@ -1298,6 +1385,13 @@ def extra_functionality(
 
     if config["sector"]["imports"]["enable"]:
         add_import_limit_constraint(n, snapshots)
+
+    if n.config.get("sector", {}).get("co2_budget_national"):
+        nhours = n.snapshot_weightings.generators.sum()
+        nyears = nhours / 8760
+        investment_year = int(snakemake.wildcards.horizon)
+        limit_countries = n.config["co2_budget_national"][investment_year]
+        add_co2limit_country(n, limit_countries, nyears, snakemake=snakemake)
 
     if n.params.custom_extra_functionality:
         source_path = n.params.custom_extra_functionality

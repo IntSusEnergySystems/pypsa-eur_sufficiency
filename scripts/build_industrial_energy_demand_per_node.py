@@ -27,7 +27,12 @@ import logging
 
 import pandas as pd
 
-from scripts._helpers import configure_logging, set_scenario_config
+from scripts._helpers import (
+    configure_logging,
+    is_reference_run,
+    is_sufficiency_run,
+    set_scenario_config,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -78,6 +83,47 @@ if __name__ == "__main__":
     nodal_df["current electricity"] = nodal_today["electricity"]
 
     nodal_df.index.name = "TWh/a (MtCO2/a)"
+
+    config = snakemake.config
+    if is_sufficiency_run(config) and dict(snakemake.input).get("clever_industry"):
+        clever_industry = pd.read_csv(snakemake.input.clever_industry, index_col=0)
+        for country in config["countries"]:
+            if country not in clever_industry.index:
+                continue
+            country_energy = nodal_df[nodal_df.index.str.startswith(country)]
+            country_energy = country_energy[
+                ~country_energy.index.isin(["DK1 0", "ES6 0", "FR5 0", "GB3 0", "IT4 0"])
+            ]
+            if country_energy.empty:
+                continue
+            src = clever_industry.loc[country]
+            nodal_df.loc[country_energy.index, "ammonia"] = src[
+                "Total Final Energy Consumption of the ammonia industry"
+            ]
+            nodal_df.loc[country_energy.index, "electricity"] = src[
+                "Total Final electricity consumption in industry"
+            ]
+            nodal_df.loc[country_energy.index, "coal"] = src[
+                "Total Final energy consumption from solid fossil fuels (coal ...) in industry"
+            ]
+            nodal_df.loc[country_energy.index, "solid biomass"] = src[
+                "Total Final energy consumption from solid biomass in industry"
+            ]
+            nodal_df.loc[country_energy.index, "methane"] = src[
+                "Total Final energy consumption from gas grid / gas consumed locally in industry"
+            ]
+            nodal_df.loc[country_energy.index, "low-temperature heat"] = src[
+                "Total Final heat consumption in industry"
+            ]
+            nodal_df.loc[country_energy.index, "hydrogen"] = src[
+                "Total Final hydrogen consumption in industry"
+            ] + src["Non-energy consumption of hydrogen for the feedstock production"]
+            nodal_df.loc[country_energy.index, "naphtha"] = (
+                src["Non-energy consumption of oil for the feedstock production"]
+                + src["Total Final oil consumption in industry"]
+            )
+    if is_reference_run(config) and "BE0 0" in nodal_df.index:
+        nodal_df.loc["BE0 0", "naphtha"] = 84.4
 
     fn = snakemake.output.industrial_energy_demand_per_node
     nodal_df.to_csv(fn, float_format="%.2f")

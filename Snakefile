@@ -29,6 +29,7 @@ from scripts.lib.validation.config import (
 
 configfile: "config/config.default.yaml"
 configfile: "config/plotting.default.yaml"
+configfile: "config/study.yaml"
 
 
 if Path("config/config.yaml").exists():
@@ -41,6 +42,12 @@ normalize_config(config, validated)
 
 run = config["run"]
 scenarios = get_scenarios(run)
+# Test and one-off configs set their own run name. Keep the reference and
+# sufficiency scenarios only when this invocation actually selects them.
+if scenarios and not isinstance(run["name"], list) and run["name"] not in scenarios:
+    config["run"]["scenarios"]["enable"] = False
+    scenarios = {}
+    run = config["run"]
 
 validate_scenarios(config, scenarios)
 
@@ -98,6 +105,7 @@ include: "rules/compose.smk"
 include: "rules/solve.smk"
 include: "rules/postprocess.smk"
 include: "rules/development.smk"
+include: "rules/pypsa2html.smk"
 
 
 # Define output categories based on foresight mode

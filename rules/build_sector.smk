@@ -812,6 +812,26 @@ rule build_co2_totals:
         scripts("build_co2_totals.py")
 
 
+rule apply_clever_co2_totals:
+    input:
+        co2_totals=resources("co2_totals.csv"),
+        clever_afolub=lambda w: (
+            f"data/clever_AFOLUB_{w.horizon}.csv"
+            if is_sufficiency_run(config)
+            else []
+        ),
+    output:
+        co2_totals=resources("co2_totals_{horizon}.csv"),
+    log:
+        logs("apply_clever_co2_totals_{horizon}.log"),
+    params:
+        countries=config_provider("countries"),
+    message:
+        "Applying CLEVER LULUCF overlay to CO2 totals for {wildcards.horizon}"
+    script:
+        scripts("apply_clever_co2_totals.py")
+
+
 rule build_transformation_output_coke:
     input:
         eurostat=resources("eurostat_energy_balances.csv"),
@@ -862,6 +882,23 @@ rule build_energy_totals:
         scripts("build_energy_totals.py")
 
 
+rule apply_clever_energy_totals:
+    input:
+        unpack(clever_energy_inputs),
+        energy_totals=resources("energy_totals.csv"),
+    output:
+        energy_totals=resources("energy_totals_{horizon}.csv"),
+    log:
+        logs("apply_clever_energy_totals_{horizon}.log"),
+    params:
+        countries=config_provider("countries"),
+        energy_totals_year=config_provider("energy", "energy_totals_year"),
+    message:
+        "Preparing horizon-specific energy totals for {wildcards.horizon}"
+    script:
+        scripts("apply_clever_energy_totals.py")
+
+
 if (COUNTRY_HDD_DATASET := dataset_version("country_hdd"))["source"] in ["build"]:
 
     # This rule uses one or multiple cutouts.
@@ -885,18 +922,18 @@ if (COUNTRY_HDD_DATASET := dataset_version("country_hdd"))["source"] in ["build"
 rule build_heat_totals:
     input:
         hdd=f"{COUNTRY_HDD_DATASET['folder']}/era5-HDD-per-country.csv",
-        energy_totals=resources("energy_totals.csv"),
+        energy_totals=resources("energy_totals_{horizon}.csv"),
     output:
-        heat_totals=resources("heat_totals.csv"),
+        heat_totals=resources("heat_totals_{horizon}.csv"),
     log:
-        logs("build_heat_totals.log"),
+        logs("build_heat_totals_{horizon}.log"),
     benchmark:
-        benchmarks("build_heat_totals")
+        benchmarks("build_heat_totals_{horizon}")
     threads: 1
     resources:
         mem_mb=2000,
     message:
-        "Building heat totals"
+        "Building heat totals for {wildcards.horizon}"
     script:
         scripts("build_heat_totals.py")
 
@@ -1196,6 +1233,11 @@ rule build_industrial_energy_demand_per_node:
         industrial_energy_demand_per_node_today=resources(
             "industrial_energy_demand_today.csv"
         ),
+        clever_industry=lambda w: (
+            f"data/clever_Industry_{w.horizon}.csv"
+            if is_sufficiency_run(config)
+            else []
+        ),
     output:
         industrial_energy_demand_per_node=resources(
             "industrial_energy_demand_{horizon}.csv"
@@ -1296,14 +1338,14 @@ rule build_retro_cost:
 
 rule build_population_weighted_energy_totals:
     input:
-        energy_totals=resources("{kind}_totals.csv"),
+        energy_totals=resources("{kind}_totals_{horizon}.csv"),
         clustered_pop_layout=resources("pop_layout.csv"),
     output:
-        resources("pop_weighted_{kind}_totals.csv"),
+        resources("pop_weighted_{kind}_totals_{horizon}.csv"),
     log:
-        logs("build_population_weighted_{kind}_totals.log"),
+        logs("build_population_weighted_{kind}_totals_{horizon}.log"),
     benchmark:
-        benchmarks("build_population_weighted_{kind}_totals")
+        benchmarks("build_population_weighted_{kind}_totals_{horizon}")
     threads: 1
     resources:
         mem_mb=2000,
@@ -1311,7 +1353,7 @@ rule build_population_weighted_energy_totals:
         snapshots=config_provider("snapshots"),
         drop_leap_day=config_provider("enable", "drop_leap_day"),
     message:
-        "Building population-weighted energy demand totals"
+        "Building population-weighted {wildcards.kind} demand totals for {wildcards.horizon}"
     script:
         scripts("build_population_weighted_energy_totals.py")
 
@@ -1321,20 +1363,20 @@ rule build_shipping_demand:
         ports=rules.retrieve_attributed_ports.output["json"],
         scope=resources("europe_shape.geojson"),
         regions=resources("onshore_regions.geojson"),
-        demand=resources("energy_totals.csv"),
+        demand=resources("energy_totals_{horizon}.csv"),
     output:
-        resources("shipping_demand.csv"),
+        resources("shipping_demand_{horizon}.csv"),
     log:
-        logs("build_shipping_demand.log"),
+        logs("build_shipping_demand_{horizon}.log"),
     benchmark:
-        benchmarks("build_shipping_demand")
+        benchmarks("build_shipping_demand_{horizon}")
     threads: 1
     resources:
         mem_mb=2000,
     params:
         energy_totals_year=config_provider("energy", "energy_totals_year"),
     message:
-        "Building shipping fuel demand projections"
+        "Building shipping fuel demand projections for {wildcards.horizon}"
     script:
         scripts("build_shipping_demand.py")
 
@@ -1369,20 +1411,22 @@ rule build_transport_demand:
     input:
         network=resources("networks/clustered.nc"),
         clustered_pop_layout=resources("pop_layout.csv"),
-        pop_weighted_energy_totals=resources("pop_weighted_energy_totals.csv"),
+        pop_weighted_energy_totals=resources(
+            "pop_weighted_energy_totals_{horizon}.csv"
+        ),
         transport_data_raw=resources("transport_data_raw.csv"),
         traffic_data_KFZ=f"{MOBILITY_PROFILES_DATASET['folder']}/kfz.csv",
         traffic_data_Pkw=f"{MOBILITY_PROFILES_DATASET['folder']}/pkw.csv",
         temp_air_total=resources("temp_air_total.nc"),
     output:
-        transport_demand=resources("transport_demand.csv"),
-        transport_data=resources("transport_data.csv"),
-        avail_profile=resources("avail_profile.csv"),
-        dsm_profile=resources("dsm_profile.csv"),
+        transport_demand=resources("transport_demand_{horizon}.csv"),
+        transport_data=resources("transport_data_{horizon}.csv"),
+        avail_profile=resources("avail_profile_{horizon}.csv"),
+        dsm_profile=resources("dsm_profile_{horizon}.csv"),
     log:
-        logs("build_transport_demand.log"),
+        logs("build_transport_demand_{horizon}.log"),
     benchmark:
-        benchmarks("build_transport_demand")
+        benchmarks("build_transport_demand_{horizon}")
     threads: 1
     resources:
         mem_mb=2000,
@@ -1392,7 +1436,7 @@ rule build_transport_demand:
         sector=config_provider("sector"),
         energy_totals_year=config_provider("energy", "energy_totals_year"),
     message:
-        "Building transport energy demand profiles"
+        "Building transport energy demand profiles for {wildcards.horizon}"
     script:
         scripts("build_transport_demand.py")
 
@@ -1423,7 +1467,9 @@ rule build_existing_heating_distribution:
     input:
         existing_heating="data/existing_infrastructure/existing_heating_raw.csv",
         clustered_pop_layout=resources("pop_layout.csv"),
-        clustered_pop_energy_layout=resources("pop_weighted_energy_totals.csv"),
+        clustered_pop_energy_layout=resources(
+            "pop_weighted_energy_totals_{horizon}.csv"
+        ),
         district_heat_share=resources("district_heat_share_{horizon}.csv"),
     output:
         existing_heating_distribution=resources(

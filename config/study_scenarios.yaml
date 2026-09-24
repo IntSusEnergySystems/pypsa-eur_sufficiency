@@ -1,0 +1,8 @@
+# Scenarios of the single workflow. The scenario name is the run name
+# used by the sufficiency and reference code paths.
+suff:
+  run:
+    name: suff
+ref:
+  run:
+    name: ref
