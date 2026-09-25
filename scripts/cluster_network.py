@@ -206,17 +206,19 @@ def apply_ac_interconnection_capacities(
 
     dc_mw = {}
     if not n.links.empty and "carrier" in n.links.columns:
-            dc = n.links[n.links.carrier.eq("DC")].copy()
-            # TYNDP projects are not part of today's net transfer capacity.
-            dc = dc[~dc.index.astype(str).str.startswith("TYNDP")]
+        dc = n.links[n.links.carrier.eq("DC")].copy()
+        # TYNDP projects are not part of today's net transfer capacity.
+        dc = dc[~dc.index.astype(str).str.startswith("TYNDP")]
         if not dc.empty:
             d0 = dc.bus0.map(country)
             d1 = dc.bus1.map(country)
             dc = dc[d0.ne(d1)]
             if not dc.empty:
                 key = pd.DataFrame(
-                    {"a": np.minimum(d0[dc.index], d1[dc.index]),
-                     "b": np.maximum(d0[dc.index], d1[dc.index])}
+                    {
+                        "a": np.minimum(d0[dc.index], d1[dc.index]),
+                        "b": np.maximum(d0[dc.index], d1[dc.index]),
+                    }
                 )
                 # Both directions are stored, so halve the sum.
                 dc_mw = (dc.groupby([key.a, key.b]).p_nom.sum() / 2).to_dict()

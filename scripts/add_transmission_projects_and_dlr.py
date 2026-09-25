@@ -85,7 +85,8 @@ def apply_tyndp_link_capacities(
         n.remove("Link", future)
 
     online = n.links.index.intersection(ready)
-    installed = n.links.loc[online, "p_nom"].sum() / 2e3  # both directions stored
+    project = pd.Index(online.astype(str)).str.replace(r"-reversed$", "", regex=True)
+    installed = n.links.loc[online].groupby(project).p_nom.first().sum() / 1e3
     logger.info(
         "TYNDP DC capacity online in %s: %.2f GW across %d links",
         year,
