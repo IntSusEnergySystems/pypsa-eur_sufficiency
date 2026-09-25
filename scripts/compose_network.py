@@ -20,10 +20,12 @@ from scripts.add_brownfield import adjust_renewable_capacity_limits
 from scripts.add_brownfield import main as apply_brownfield
 from scripts.add_electricity import main as add_electricity_components
 from scripts.add_electricity import (
+    apply_nuclear_capacity,
     sanitize_carriers,
     sanitize_locations,
 )
 from scripts.add_existing_baseyear import main as add_existing_capacities
+from scripts.cluster_network import apply_ac_interconnection_capacities
 from scripts.prepare_network import (
     apply_co2_budget_constraints,
     apply_temporal_aggregation,
@@ -104,6 +106,15 @@ if __name__ == "__main__":
             n, n_previous, inputs, params, current_horizon, renewable_carriers
         )
 
+    # One extendable nuclear generator per country. Existing MW come from the
+    # horizon table; earlier myopic builds are added on top of that.
+    apply_nuclear_capacity(
+        n,
+        inputs.nuclear_capacity,
+        current_horizon,
+        n_previous=n_previous if foresight == "myopic" and not is_first_horizon else None,
+    )
+
     if foresight == "perfect":
         n = prepare_perfect_foresight(n, n_previous, params, current_horizon)
         apply_phase_outs(n, phase_outs, horizons)
@@ -128,5 +139,6 @@ if __name__ == "__main__":
             "known pandas/PyPSA MultiIndex limitation."
         )
 
+    apply_ac_interconnection_capacities(n)
     logger.info(f"Exporting composed network for horizon {current_horizon}")
     n.export_to_netcdf(snakemake.output[0])

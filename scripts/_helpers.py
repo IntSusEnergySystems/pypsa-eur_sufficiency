@@ -39,11 +39,18 @@ PYPSA_V1 = bool(re.match(r"^1\.\d", pypsa.__version__))
 
 
 def is_sufficiency_run(config: dict | None = None) -> bool:
-    """Return True for the sufficiency scenario and related sensitivity runs."""
+    """Return True when CLEVER demands replace the reference energy totals."""
     if config is None:
         config = {}
     name = str((config.get("run") or {}).get("name") or "")
-    return name == "suff" or "sensitivity_analysis" in name
+    return name in {"suff", "suff-nocdr"} or "sensitivity_analysis" in name
+
+
+def is_nocdr_run(config: dict | None = None) -> bool:
+    """Return True when sequestration, DAC and BECCS are switched off."""
+    if config is None:
+        config = {}
+    return str((config.get("run") or {}).get("name") or "") == "suff-nocdr"
 
 
 def is_reference_run(config: dict | None = None) -> bool:

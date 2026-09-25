@@ -222,7 +222,9 @@ _run_name = ""
 
 
 def _is_sufficiency() -> bool:
-    return _run_name == "suff" or "sensitivity_analysis" in str(_run_name)
+    return _run_name in {"suff", "suff-nocdr"} or "sensitivity_analysis" in str(
+        _run_name
+    )
 
 
 def _is_reference() -> bool:
@@ -230,7 +232,8 @@ def _is_reference() -> bool:
 
 
 def _cc_extendable() -> bool:
-    return not _is_sufficiency()
+    # suff-nocdr keeps carbon capture for utilisation only.
+    return _run_name != "suff-nocdr"
 
 
 def determine_emission_sectors(options):
@@ -2136,30 +2139,7 @@ def add_EVs(
         unit="MWh_el",
     )
 
-    # Calculate temperature-corrected efficiency
-    car_efficiency = options["transport_electric_efficiency"]
-    efficiency = get_temp_efficency(
-        car_efficiency,
-        temperature,
-        options["transport_heating_deadband_lower"],
-        options["transport_heating_deadband_upper"],
-        options["EV_lower_degree_factor"],
-        options["EV_upper_degree_factor"],
-    )
-
-    # Apply rolling average smoothing to power profile
-    p_shifted = (p_set + cycling_shift(p_set, 1) + cycling_shift(p_set, 2)) / 3
-    cyclic_eff = p_set.div(p_shifted)
-    efficiency *= cyclic_eff
-
-    # Calculate load profile
-    if _is_sufficiency():
-        p_set = p_set.copy()
-        p_shifted = (p_set + cycling_shift(p_set, 1) + cycling_shift(p_set, 2)) / 3
-        cyclic_eff = p_set.div(p_shifted)
-        profile = electric_share * p_set
-    else:
-        profile = electric_share * p_set.div(efficiency)
+    profile = electric_share * p_set
 
     # Add EV load
     n.add(
@@ -2277,23 +2257,7 @@ def add_fuel_cell_cars(
     2. Converting transport energy demand to hydrogen demand
     3. Scaling by the fuel cell vehicle share
     """
-    car_efficiency = options["transport_fuel_cell_efficiency"]
-
-    # Calculate temperature-corrected efficiency
-    efficiency = get_temp_efficency(
-        car_efficiency,
-        temperature,
-        options["transport_heating_deadband_lower"],
-        options["transport_heating_deadband_upper"],
-        options["ICE_lower_degree_factor"],
-        options["ICE_upper_degree_factor"],
-    )
-
-    # Calculate hydrogen demand profile
-    if _is_reference():
-        profile = fuel_cell_share * p_set.div(efficiency)
-    else:
-        profile = fuel_cell_share * p_set
+    profile = fuel_cell_share * p_set
 
     # Add hydrogen load for fuel cell vehicles
     n.add(
@@ -2373,27 +2337,7 @@ def add_ice_cars(
         cf_industry=cf_industry,
     )
 
-    car_efficiency = options["transport_ice_efficiency"]
-
-    # Calculate temperature-corrected efficiency
-    efficiency = get_temp_efficency(
-        car_efficiency,
-        temperature,
-        options["transport_heating_deadband_lower"],
-        options["transport_heating_deadband_upper"],
-        options["ICE_lower_degree_factor"],
-        options["ICE_upper_degree_factor"],
-    )
-
-    # Calculate oil demand profile
-    if _is_reference():
-        profile = ice_share * p_set.div(efficiency).rename(
-            columns=lambda x: x + " land transport oil"
-        )
-    else:
-        profile = ice_share * p_set.rename(
-            columns=lambda x: x + " land transport oil"
-        )
+    profile = (ice_share * p_set).rename(columns=lambda x: x + " land transport oil")
 
     if not options["regional_oil_demand"]:
         profile = profile.sum(axis=1).to_frame(name="EU land transport oil")
@@ -2516,81 +2460,106 @@ def add_land_transport(
     electric_share = shares["electric"]
     fuel_cell_share = shares["fuel_cell"]
     ice_share = shares["ice"]
-    if _is_sufficiency() and clever_transport_file and pop_layout is not None:
-        demands = pd.read_csv(clever_transport_file, index_col=0)
-        clever_totals = demands.loc[pop_layout.ct].fillna(0.0)
+    # CLEVER road shares are used for every scenario. Oil/ICE is whatever is
+    # left after electricity and hydrogen.
+    if clever_transport_file and pop_layout is not None:
+        demands = pd.read_csv(clever_transport_file, index_col=0).fillna(0.0)
+        clever_totals = demands.reindex(pop_layout.ct).fillna(0.0)
         clever_totals.index = pop_layout.index
-        clever_totals = clever_totals.multiply(pop_layout.fraction, axis=0)
         total_share = clever_totals["Total_Road"]
         elec_val = clever_totals["Electricity_Road"]
-        hydro_val = clever_totals["hydrogen_road"]
-        electric_share = elec_val / total_share
-        fuel_cell_share = hydro_val / total_share
-        ice_share = (total_share - elec_val - hydro_val) / total_share
+        if "hydrogen_road" in clever_totals.columns:
+            hydro_val = clever_totals["hydrogen_road"]
+        else:
+            # Freight energy is stored on the duplicated ".1" columns.
+            hydro_val = sum(
+                (
+                    clever_totals[col]
+                    for col in (
+                        "Final energy consumption from gaseous motor fuels - hydrogen for passenger road mobility",
+                        "Final energy consumption from gaseous motor fuels - hydrogen for road freight transport",
+                        "Final energy consumption from gaseous motor fuels - hydrogen for road freight transport.1",
+                    )
+                    if col in clever_totals.columns
+                ),
+                start=pd.Series(0.0, index=clever_totals.index),
+            )
+        electric_share = elec_val.div(total_share).replace([np.inf, -np.inf], np.nan)
+        fuel_cell_share = hydro_val.div(total_share).replace([np.inf, -np.inf], np.nan)
+        ice_share = (total_share - elec_val - hydro_val).div(total_share).replace(
+            [np.inf, -np.inf], np.nan
+        )
+        electric_share = electric_share.fillna(shares["electric"])
+        fuel_cell_share = fuel_cell_share.fillna(shares["fuel_cell"])
+        ice_share = ice_share.fillna(shares["ice"])
 
-    if _is_sufficiency():
-        if electric_share.sum() > 0 if hasattr(electric_share, "sum") else electric_share > 0:
-            add_EVs(
-                n,
-                avail_profile,
-                dsm_profile,
-                p_set,
-                electric_share,
-                number_cars,
-                temperature,
-                spatial,
-                options,
-            )
-        if fuel_cell_share.sum() > 0 if hasattr(fuel_cell_share, "sum") else fuel_cell_share > 0:
-            add_fuel_cell_cars(
-                n=n,
-                p_set=p_set,
-                fuel_cell_share=fuel_cell_share,
-                temperature=temperature,
-                options=options,
-                spatial=spatial,
-            )
-        if ice_share.sum() > 0 if hasattr(ice_share, "sum") else ice_share > 0:
-            add_ice_cars(
-                n,
-                costs,
-                p_set,
-                ice_share,
-                temperature,
-                cf_industry,
-                spatial,
-                options,
-            )
-        return
+    # CLEVER carrier shares are used in every scenario. In the reference case,
+    # heating and drivetrain efficiency change the total energy only.
+    if not _is_sufficiency():
+        deadband_lower = options["transport_heating_deadband_lower"]
+        deadband_upper = options["transport_heating_deadband_upper"]
+        eff_electric = get_temp_efficency(
+            options["transport_electric_efficiency"],
+            temperature,
+            deadband_lower,
+            deadband_upper,
+            options["EV_lower_degree_factor"],
+            options["EV_upper_degree_factor"],
+        )
+        p_shifted = (p_set + cycling_shift(p_set, 1) + cycling_shift(p_set, 2)) / 3
+        eff_electric = eff_electric * p_set.div(p_shifted)
+        eff_fuel_cell = get_temp_efficency(
+            options["transport_fuel_cell_efficiency"],
+            temperature,
+            deadband_lower,
+            deadband_upper,
+            options["ICE_lower_degree_factor"],
+            options["ICE_upper_degree_factor"],
+        )
+        eff_ice = get_temp_efficency(
+            options["transport_ice_efficiency"],
+            temperature,
+            deadband_lower,
+            deadband_upper,
+            options["ICE_lower_degree_factor"],
+            options["ICE_upper_degree_factor"],
+        )
+        p_set = (
+            electric_share * p_set.div(eff_electric)
+            + fuel_cell_share * p_set.div(eff_fuel_cell)
+            + ice_share * p_set.div(eff_ice)
+        )
 
-    if shares["electric"] > 0:
+    def _share_positive(share) -> bool:
+        return bool(np.nansum(share) > 0)
+
+    if _share_positive(electric_share):
         add_EVs(
             n,
             avail_profile,
             dsm_profile,
             p_set,
-            shares["electric"],
+            electric_share,
             number_cars,
             temperature,
             spatial,
             options,
         )
-
-    if shares["fuel_cell"] > 0:
+    if _share_positive(fuel_cell_share):
         add_fuel_cell_cars(
             n=n,
             p_set=p_set,
-            fuel_cell_share=shares["fuel_cell"],
+            fuel_cell_share=fuel_cell_share,
             temperature=temperature,
             options=options,
             spatial=spatial,
         )
-    if shares["ice"] > 0:
+    if _share_positive(ice_share):
         add_ice_cars(
             n,
             costs,
             p_set,
-            shares["ice"],
+            ice_share,
             temperature,
             cf_industry,
             spatial,
@@ -5245,6 +5214,7 @@ def add_shipping(
     options: dict,
     spatial: SimpleNamespace,
     investment_year: int,
+    clever_transport_file: str | None = None,
 ) -> None:
     logger.info("Add shipping")
 
@@ -5256,11 +5226,81 @@ def add_shipping(
     shipping_methanol_share = get(options["shipping_methanol_share"], investment_year)
     shipping_oil_share = get(options["shipping_oil_share"], investment_year)
 
-    total_share = shipping_hydrogen_share + shipping_methanol_share + shipping_oil_share
-    if total_share != 1:
-        logger.warning(
-            f"Total shipping shares sum up to {total_share:.2%}, corresponding to increased or decreased demand assumptions."
+    if clever_transport_file:
+        # CLEVER shipping energy is liquid fuels (oil), hydrogen, and every
+        # other fuel (NGV, biomethane, and anything else PyPSA does not model),
+        # which is carried as methanol. Shares are applied in every scenario.
+        clever = pd.read_csv(clever_transport_file, index_col=0).fillna(0.0)
+
+        def _clever_col(name: str) -> pd.Series:
+            if name in clever.columns:
+                return clever[name]
+            return pd.Series(0.0, index=clever.index)
+
+        oil = (
+            _clever_col(
+                "Final energy consumption from liquid fuels in national water freight transport"
+            )
+            + _clever_col(
+                "Final energy consumption from liquid fuels in international water freight transport"
+            )
+            + _clever_col(
+                "Final energy consumption from liquid fuels in water passenger transport"
+            )
         )
+        hydrogen = sum(
+            (
+                clever[col]
+                for col in clever.columns
+                if "hydrogen" in col.lower() and "water" in col.lower()
+            ),
+            start=pd.Series(0.0, index=clever.index),
+        )
+        other = (
+            _clever_col(
+                "Final energy consumption from NGV / biomethane in national water freight transport"
+            )
+            + _clever_col(
+                "Final energy consumption from NGV / biomethane in international water freight transport"
+            )
+        )
+        freight_total = _clever_col(
+            "Total final energy consumption for water freight transport"
+        )
+        accounted = (
+            _clever_col(
+                "Final energy consumption from liquid fuels in national water freight transport"
+            )
+            + _clever_col(
+                "Final energy consumption from liquid fuels in international water freight transport"
+            )
+            + hydrogen
+            + _clever_col(
+                "Final energy consumption from NGV / biomethane in national water freight transport"
+            )
+            + _clever_col(
+                "Final energy consumption from NGV / biomethane in international water freight transport"
+            )
+        )
+        other = other + (freight_total - accounted).clip(lower=0)
+        total = oil + hydrogen + other
+
+        def _nodal_share(values: pd.Series, fallback: float) -> pd.Series:
+            share = values.div(total).replace([np.inf, -np.inf], np.nan)
+            share = share.where(total > 0, fallback)
+            return share.reindex(pop_layout.ct).set_axis(pop_layout.index).fillna(fallback)
+
+        shipping_oil_share = _nodal_share(oil, shipping_oil_share)
+        shipping_hydrogen_share = _nodal_share(hydrogen, shipping_hydrogen_share)
+        shipping_methanol_share = _nodal_share(other, shipping_methanol_share)
+    else:
+        total_share = (
+            shipping_hydrogen_share + shipping_methanol_share + shipping_oil_share
+        )
+        if total_share != 1:
+            logger.warning(
+                f"Total shipping shares sum up to {total_share:.2%}, corresponding to increased or decreased demand assumptions."
+            )
 
     domestic_navigation = pop_weighted_energy_totals.loc[
         nodes, ["total domestic navigation"]
@@ -5270,15 +5310,20 @@ def add_shipping(
     )
     all_navigation = domestic_navigation + international_navigation
     p_set = all_navigation * 1e6 / nhours
+    if not _is_sufficiency():
+        # Default PyPSA rescales hydrogen and methanol relative to oil. Fold
+        # that into the total, then apply the same CLEVER shares as sufficiency.
+        k_hydrogen = options["shipping_oil_efficiency"] / costs.at["fuel cell", "efficiency"]
+        k_methanol = (
+            options["shipping_oil_efficiency"] / options["shipping_methanol_efficiency"]
+        )
+        p_set = (
+            shipping_hydrogen_share * p_set * k_hydrogen
+            + shipping_methanol_share * p_set * k_methanol
+            + shipping_oil_share * p_set
+        )
 
-    if shipping_hydrogen_share:
-        oil_efficiency = options.get(
-            "shipping_oil_efficiency", options.get("shipping_average_efficiency", 0.4)
-        )
-        efficiency = oil_efficiency / costs.at["fuel cell", "efficiency"]
-        shipping_hydrogen_share = get(
-            options["shipping_hydrogen_share"], investment_year
-        )
+    if np.nansum(shipping_hydrogen_share) > 0:
 
         if options["shipping_hydrogen_liquefaction"]:
             n.add(
@@ -5306,10 +5351,7 @@ def add_shipping(
         else:
             shipping_bus = nodes + " H2"
 
-        efficiency = (
-            options["shipping_oil_efficiency"] / costs.at["fuel cell", "efficiency"]
-        )
-        p_set_hydrogen = shipping_hydrogen_share * p_set * efficiency
+        p_set_hydrogen = shipping_hydrogen_share * p_set
 
         n.add(
             "Load",
@@ -5320,15 +5362,9 @@ def add_shipping(
             p_set=p_set_hydrogen,
         )
 
-    if shipping_methanol_share:
-        efficiency = (
-            options["shipping_oil_efficiency"] / options["shipping_methanol_efficiency"]
-        )
-
-        p_set_methanol_shipping = (
-            shipping_methanol_share
-            * p_set.rename(lambda x: x + " shipping methanol")
-            * efficiency
+    if np.nansum(shipping_methanol_share) > 0:
+        p_set_methanol_shipping = (shipping_methanol_share * p_set).rename(
+            lambda x: x + " shipping methanol"
         )
 
         if not options["methanol"]["regional_methanol_demand"]:
@@ -5361,8 +5397,8 @@ def add_shipping(
             efficiency2=costs.at["methanolisation", "carbondioxide-input"],
         )
 
-    if shipping_oil_share:
-        p_set_oil = shipping_oil_share * p_set.rename(lambda x: x + " shipping oil")
+    if np.nansum(shipping_oil_share) > 0:
+        p_set_oil = (shipping_oil_share * p_set).rename(lambda x: x + " shipping oil")
 
         if not options["regional_oil_demand"]:
             p_set_oil = p_set_oil.sum()
@@ -6387,6 +6423,12 @@ def main(
         extendable_carriers=sorted(extendable_stores),
     )
 
+    clever_transport_file = (
+        inputs["clever_transport"]
+        if "clever_transport" in inputs.keys() and inputs["clever_transport"]
+        else None
+    )
+
     if options["transport"]:
         add_land_transport(
             n=n,
@@ -6402,11 +6444,7 @@ def main(
             investment_year=current_horizon,
             nodes=spatial.nodes,
             pop_layout=pop_layout,
-            clever_transport_file=(
-                inputs["clever_transport"]
-                if "clever_transport" in inputs.keys()
-                else None
-            ),
+            clever_transport_file=clever_transport_file,
         )
 
     if options["heating"]:
@@ -6488,6 +6526,7 @@ def main(
             options=options,
             spatial=spatial,
             investment_year=current_horizon,
+            clever_transport_file=clever_transport_file,
         )
 
     if options["aviation"]:

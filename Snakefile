@@ -31,7 +31,6 @@ configfile: "config/config.default.yaml"
 configfile: "config/plotting.default.yaml"
 configfile: "config/study.yaml"
 
-
 if Path("config/config.yaml").exists():
 
     configfile: "config/config.yaml"
@@ -227,6 +226,11 @@ rule all:
         (expand(MYOPIC_OUTPUTS, run=config["run"]["name"]) if MYOPIC_OUTPUTS else []),
         get_sector_network_plots,
         get_balance_map_plots,
+        (
+            "results/graphs/scenario_demands.png"
+            if isinstance(config["run"]["name"], list)
+            else []
+        ),
 
 
 rule create_scenarios:

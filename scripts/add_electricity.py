@@ -259,6 +259,79 @@ def add_co2_emissions(n, costs, carriers):
     ].values
 
 
+def _generator_countries(n: pypsa.Network, generators: pd.DataFrame) -> pd.Series:
+    if "country" in n.buses.columns:
+        country = generators.bus.map(n.buses.country)
+    else:
+        country = pd.Series(pd.NA, index=generators.index)
+    return country.fillna(generators.bus.astype(str).str[:2])
+
+
+def apply_nuclear_capacity(
+    n: pypsa.Network,
+    capacity_file: str,
+    year: int,
+    n_previous: pypsa.Network | None = None,
+) -> None:
+    """
+    Replace powerplant nuclear capacities with the horizon table.
+
+    ``capacity_file`` gives existing capacity still online in each planning
+    horizon (MW, indexed by country). All nuclear units in a country are
+    collapsed to one extendable generator so a plant with no decommissioning
+    date cannot sit beside a second dated unit. ``p_nom_min`` is the table
+    value. New capacity built in a previous myopic horizon is kept on top of
+    that, because the table only describes the existing fleet.
+    """
+    table = pd.read_csv(capacity_file, index_col=0, comment="#")
+    table.columns = table.columns.astype(int)
+    if year not in table.columns:
+        raise ValueError(
+            f"Nuclear capacity file {capacity_file} has no column for {year}. "
+            f"Available years: {list(table.columns)}"
+        )
+    available = table[year].fillna(0.0)
+
+    carried = pd.Series(dtype=float)
+    if n_previous is not None:
+        prev = n_previous.generators[n_previous.generators.carrier == "nuclear"]
+        if not prev.empty and "p_nom_opt" in prev.columns:
+            new_mw = (prev["p_nom_opt"] - prev["p_nom_min"]).clip(lower=0)
+            carried = new_mw.groupby(_generator_countries(n_previous, prev)).sum()
+
+    gens = n.generators[n.generators.carrier == "nuclear"]
+    if gens.empty:
+        logger.info("No nuclear generators present for %s", year)
+        return
+
+    countries = _generator_countries(n, gens)
+    removed = []
+    for country, idx in gens.groupby(countries).groups.items():
+        idx = pd.Index(idx)
+        keep = n.generators.loc[idx, "p_nom"].idxmax()
+        drop = idx.difference([keep])
+        existing = float(available.get(country, 0.0))
+        extra = float(carried.get(country, 0.0)) if country in carried.index else 0.0
+        total = existing + extra
+        n.generators.loc[keep, "p_nom"] = total
+        n.generators.loc[keep, "p_nom_min"] = total
+        n.generators.loc[keep, "p_nom_extendable"] = True
+        n.generators.loc[keep, "p_nom_max"] = np.inf
+        if len(drop):
+            removed.extend(drop)
+        logger.info(
+            "Nuclear %s in %s: %.3f GW existing from table, %.3f GW carried from "
+            "previous builds, extendable",
+            country,
+            year,
+            existing / 1e3,
+            extra / 1e3,
+        )
+
+    if removed:
+        n.remove("Generator", removed)
+
+
 def load_and_aggregate_powerplants(
     ppl_fn: str,
     costs: pd.DataFrame,
@@ -344,31 +417,36 @@ def load_and_aggregate_powerplants(
                 df.update({"carrier": df_c.carrier + " " + suffix + " efficiency"})
 
     grouper = ["bus", "carrier"]
-    weights = df.groupby(grouper).p_nom.transform(normed_or_uniform)
+    if df.empty:
+        aggregated = df.copy()
+    else:
+        weights = df.groupby(grouper).p_nom.transform(normed_or_uniform)
 
-    for k, v in strategies.items():
-        if v == "capacity_weighted_average":
-            df[k] = df[k] * weights
-            strategies[k] = pd.Series.sum
+        for k, v in strategies.items():
+            if v == "capacity_weighted_average":
+                df[k] = df[k] * weights
+                strategies[k] = pd.Series.sum
 
-    aggregated = df.groupby(grouper, as_index=False).agg(strategies)
-    aggregated.index = aggregated.bus + " " + aggregated.carrier
-    aggregated.build_year = aggregated.build_year.astype(int)
-    aggregated.carrier = aggregated.carrier.str.replace(
-        r" Q\d+ efficiency", "", regex=True
-    )
+        aggregated = df.groupby(grouper, as_index=False).agg(strategies)
+        aggregated.index = aggregated.bus + " " + aggregated.carrier
+        aggregated.build_year = aggregated.build_year.astype(int)
+        aggregated.carrier = aggregated.carrier.str.replace(
+            r" Q\d+ efficiency", "", regex=True
+        )
 
     disaggregated = ppl[~to_aggregate].copy()
-    disaggregated.index = (
-        disaggregated.bus
-        + " "
-        + disaggregated.carrier
-        + " "
-        + disaggregated.index.astype(str)
-        + " "
-        + disaggregated.name
-    )
-    disaggregated = disaggregated[aggregated.columns]
+    if not disaggregated.empty:
+        disaggregated.index = (
+            disaggregated.bus
+            + " "
+            + disaggregated.carrier
+            + " "
+            + disaggregated.index.astype(str)
+            + " "
+            + disaggregated.name
+        )
+        if len(aggregated.columns):
+            disaggregated = disaggregated[aggregated.columns]
 
     return pd.concat([aggregated, disaggregated])
 

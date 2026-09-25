@@ -21,7 +21,7 @@ from snakemake.utils import update_config
 
 def clever_energy_inputs(w):
     """Optional CLEVER CSV inputs used when overlaying sufficiency demands."""
-    if not is_sufficiency_run(config):
+    if not is_sufficiency_run(get_config(w)):
         return {}
     horizon = w.horizon
     return dict(

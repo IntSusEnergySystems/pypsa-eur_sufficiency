@@ -73,6 +73,9 @@ from scripts._helpers import configure_logging, sanitize_busmap, set_scenario_co
 
 PD_GE_2_2 = parse(pd.__version__) >= Version("2.2")
 
+# ENTSO-E TYNDP 2024 reference-grid transfer capacities, aggregated to countries.
+AC_INTERCONNECTION_NTC = "data/ac_interconnection_ntc.csv"
+
 warnings.filterwarnings(action="ignore", category=UserWarning)
 idx = pd.IndexSlice
 logger = logging.getLogger(__name__)
@@ -172,6 +175,69 @@ def busmap_from_shapes(
                 busmap.at[i] = dists.idxmin()
 
     return sanitize_busmap(busmap)
+
+
+def apply_ac_interconnection_capacities(
+    n: pypsa.Network, ntc_file: str = AC_INTERCONNECTION_NTC
+) -> None:
+    """
+    Set cross-border AC line ratings so their usable capacity matches current
+    country-to-country AC interconnection capacity.
+
+    ``ntc_file`` holds the total (AC+DC) net transfer capacity. Existing DC
+    link capacity is subtracted, because those links are kept as they are.
+    Lines inside one country are left unchanged. Usable capacity is
+    ``s_nom * s_max_pu``.
+    """
+    if n.lines.empty or "country" not in n.buses.columns:
+        return
+    ntc = pd.read_csv(ntc_file)
+    ntc["country_a"] = ntc.country_a.astype(str)
+    ntc["country_b"] = ntc.country_b.astype(str)
+    ntc = ntc.set_index(["country_a", "country_b"]).ntc_mw
+
+    country = n.buses.country
+    c0 = n.lines.bus0.map(country)
+    c1 = n.lines.bus1.map(country)
+    pair = pd.DataFrame({"a": np.minimum(c0, c1), "b": np.maximum(c0, c1)}, index=n.lines.index)
+    cross = c0.ne(c1)
+    if not cross.any():
+        return
+
+    dc_mw = {}
+    if not n.links.empty and "carrier" in n.links.columns:
+        dc = n.links[n.links.carrier.eq("DC")].copy()
+        if not dc.empty:
+            d0 = dc.bus0.map(country)
+            d1 = dc.bus1.map(country)
+            dc = dc[d0.ne(d1)]
+            if not dc.empty:
+                key = pd.DataFrame(
+                    {"a": np.minimum(d0[dc.index], d1[dc.index]),
+                     "b": np.maximum(d0[dc.index], d1[dc.index])}
+                )
+                # Both directions are stored, so halve the sum.
+                dc_mw = (dc.groupby([key.a, key.b]).p_nom.sum() / 2).to_dict()
+
+    s_max = n.lines.s_max_pu.fillna(1.0).clip(lower=1e-6)
+    usable = n.lines.s_nom * s_max
+    for (a, b), group in n.lines.loc[cross].groupby([pair.loc[cross, "a"], pair.loc[cross, "b"]]):
+        if (a, b) in ntc.index:
+            target = max(float(ntc.loc[(a, b)]) - float(dc_mw.get((a, b), 0.0)), 0.0)
+        else:
+            target = 0.0
+        current = float(usable.loc[group.index].sum())
+        if current <= 0:
+            continue
+        scale = target / current
+        extension = n.lines.loc[group.index, "s_nom_max"] - n.lines.loc[group.index, "s_nom"]
+        n.lines.loc[group.index, "s_nom"] *= scale
+        n.lines.loc[group.index, "s_nom_min"] = n.lines.loc[group.index, "s_nom"]
+        n.lines.loc[group.index, "s_nom_max"] = n.lines.loc[group.index, "s_nom"] + extension
+        logger.info(
+            "AC interconnection %s-%s: %.0f MW usable -> %.0f MW",
+            a, b, current, target,
+        )
 
 
 def copperplate_buses(n: pypsa.Network, copperplate_regions: list[list[str]]):
@@ -455,7 +521,10 @@ def apply_carrier_mixing_policy(
             "Splitting %s mixed AC/DC clusters by carrier before aggregation.",
             len(mixed_clusters),
         )
-    return busmap.str.cat(carrier_by_bus, sep="")
+        mixed = busmap.isin(mixed_clusters)
+        busmap = busmap.copy()
+        busmap.loc[mixed] = busmap.loc[mixed].str.cat(carrier_by_bus.loc[mixed], sep="")
+    return busmap
 
 
 def cluster_regions(
@@ -773,6 +842,7 @@ if __name__ == "__main__":
 
     nc.buses["location"] = nc.buses.index
     nc.buses["unit"] = "MWh_el"
+    apply_ac_interconnection_capacities(nc)
 
     nc.meta = dict(snakemake.config)
     nc.export_to_netcdf(snakemake.output.network)

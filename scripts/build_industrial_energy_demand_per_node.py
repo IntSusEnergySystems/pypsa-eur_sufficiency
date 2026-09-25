@@ -91,37 +91,46 @@ if __name__ == "__main__":
             if country not in clever_industry.index:
                 continue
             country_energy = nodal_df[nodal_df.index.str.startswith(country)]
-            country_energy = country_energy[
-                ~country_energy.index.isin(["DK1 0", "ES6 0", "FR5 0", "GB3 0", "IT4 0"])
-            ]
             if country_energy.empty:
                 continue
+            # CLEVER values are national totals. Split them by the industry
+            # already allocated to each node so a country with several buses
+            # is not given the full national demand on every bus.
+            weights = country_energy["electricity"].clip(lower=0)
+            if float(weights.sum()) <= 0:
+                weights = pd.Series(1.0, index=country_energy.index)
+            share = weights / weights.sum()
             src = clever_industry.loc[country]
-            nodal_df.loc[country_energy.index, "ammonia"] = src[
-                "Total Final Energy Consumption of the ammonia industry"
-            ]
-            nodal_df.loc[country_energy.index, "electricity"] = src[
-                "Total Final electricity consumption in industry"
-            ]
-            nodal_df.loc[country_energy.index, "coal"] = src[
-                "Total Final energy consumption from solid fossil fuels (coal ...) in industry"
-            ]
-            nodal_df.loc[country_energy.index, "solid biomass"] = src[
-                "Total Final energy consumption from solid biomass in industry"
-            ]
-            nodal_df.loc[country_energy.index, "methane"] = src[
-                "Total Final energy consumption from gas grid / gas consumed locally in industry"
-            ]
-            nodal_df.loc[country_energy.index, "low-temperature heat"] = src[
-                "Total Final heat consumption in industry"
-            ]
-            nodal_df.loc[country_energy.index, "hydrogen"] = src[
-                "Total Final hydrogen consumption in industry"
-            ] + src["Non-energy consumption of hydrogen for the feedstock production"]
-            nodal_df.loc[country_energy.index, "naphtha"] = (
-                src["Non-energy consumption of oil for the feedstock production"]
-                + src["Total Final oil consumption in industry"]
-            )
+            totals = {
+                "ammonia": src[
+                    "Total Final Energy Consumption of the ammonia industry"
+                ],
+                "electricity": src[
+                    "Total Final electricity consumption in industry"
+                ],
+                "coal": src[
+                    "Total Final energy consumption from solid fossil fuels (coal ...) in industry"
+                ],
+                "solid biomass": src[
+                    "Total Final energy consumption from solid biomass in industry"
+                ],
+                "methane": src[
+                    "Total Final energy consumption from gas grid / gas consumed locally in industry"
+                ],
+                "low-temperature heat": src[
+                    "Total Final heat consumption in industry"
+                ],
+                "hydrogen": src["Total Final hydrogen consumption in industry"]
+                + src[
+                    "Non-energy consumption of hydrogen for the feedstock production"
+                ],
+                "naphtha": src[
+                    "Non-energy consumption of oil for the feedstock production"
+                ]
+                + src["Total Final oil consumption in industry"],
+            }
+            for column, total in totals.items():
+                nodal_df.loc[country_energy.index, column] = share * float(total)
     if is_reference_run(config) and "BE0 0" in nodal_df.index:
         nodal_df.loc["BE0 0", "naphtha"] = 84.4
 

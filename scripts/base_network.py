@@ -1527,8 +1527,9 @@ def build_admin_shapes(
                 .map(level_map)
             )
 
-        # If GB is in the countries, set the level, aggregate London area to level 1 due to converging issues
-        if "GB" in countries and level != "bz":
+        # Keep Inner London separate only when clustering is finer than a country.
+        # At country level Great Britain stays one node.
+        if "GB" in countries and level not in (0, "bz"):
             nuts3_regions.loc[nuts3_regions.level1 == "GBI", "column"] = "level1"
 
         nuts3_regions["admin"] = nuts3_regions.apply(

@@ -69,6 +69,17 @@ if HAVE_PYPSA2HTML:
         """Cross-scenario report, including the comparison overview page."""
         params:
             config_file=PYPSA2HTML_CONFIG,
+        input:
+            networks=expand(
+                "results/{run}/networks/solved_{horizon}.nc",
+                run=config["run"]["name"]
+                if isinstance(config["run"]["name"], list)
+                else [config["run"]["name"]],
+                horizon=config["planning_horizons"]
+                if isinstance(config["planning_horizons"], list)
+                else [config["planning_horizons"]],
+            ),
+            config_file=PYPSA2HTML_CONFIG,
         output:
             index="results/html/index.html",
         log:

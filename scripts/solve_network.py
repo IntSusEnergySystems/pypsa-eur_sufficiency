@@ -1710,10 +1710,9 @@ if __name__ == "__main__":
         TerminationCondition.infeasible,
         TerminationCondition.infeasible_or_unbounded,
     ]:
-        labels = n.model.compute_infeasibilities()
-        logger.info(f"Labels:\n{labels}")
-        n.model.print_infeasibilities()
-        raise RuntimeError("Solving status 'infeasible'. Infeasibilities computed.")
+        raise RuntimeError(
+            f"Solving status '{status}' with termination condition '{condition}'."
+        )
 
     if status == SolverStatus.warning:
         raise RuntimeError("Solving status 'warning'. Discarding solution.")

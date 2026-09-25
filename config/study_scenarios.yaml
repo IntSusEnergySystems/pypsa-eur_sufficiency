@@ -1,8 +1,25 @@
-# Scenarios of the single workflow. The scenario name is the run name
-# used by the sufficiency and reference code paths.
-suff:
-  run:
-    name: suff
+# Scenario name is the run name used by the sufficiency and reference paths.
+# suff uses CLEVER demands and the same CCS, DAC and sequestration options as ref.
+# suff-nocdr uses CLEVER demands but allows only CCU.
 ref:
   run:
     name: ref
+suff:
+  run:
+    name: suff
+suff-nocdr:
+  run:
+    name: suff-nocdr
+  sector:
+    dac: false
+    SMR_cc: false
+    co2_sequestration_potential:
+      2020: 0
+      2025: 0
+      2030: 0
+      2035: 0
+      2040: 0
+      2045: 0
+      2050: 0
+    regional_co2_sequestration_potential:
+      enable: false

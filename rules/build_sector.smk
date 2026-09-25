@@ -817,7 +817,7 @@ rule apply_clever_co2_totals:
         co2_totals=resources("co2_totals.csv"),
         clever_afolub=lambda w: (
             f"data/clever_AFOLUB_{w.horizon}.csv"
-            if is_sufficiency_run(config)
+            if is_sufficiency_run(get_config(w))
             else []
         ),
     output:
@@ -1235,7 +1235,7 @@ rule build_industrial_energy_demand_per_node:
         ),
         clever_industry=lambda w: (
             f"data/clever_Industry_{w.horizon}.csv"
-            if is_sufficiency_run(config)
+            if is_sufficiency_run(get_config(w))
             else []
         ),
     output:

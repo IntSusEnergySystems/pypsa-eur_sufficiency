@@ -16,7 +16,7 @@ project:
   decimals: 3
 
 model:
-  clusters: 33
+  clusters: 28
   opts: ""
   # Must match the solved networks' sector_opts token (filename pattern).
   sector_opts: ""
@@ -24,7 +24,7 @@ model:
 
 nodes:
   detect: true
-  focus: BE0 0        
+  focus: BE
   labels:
     AT0 0: Austria
     BE0 0: Belgium
@@ -67,24 +67,8 @@ nodes:
     # New projects should leave it at the default "ALL".
     code: EU
     label: 28 countries
-  # Belgium total = the three NUTS-1 regions, not the 5-country sum.
-  # Explicit members only — never `.str[:2]` / prefix matching.
-  groups:
-    - code: DK0 0
-      label: Denmark
-      members: [DK0 0, DK1 0]
-    - code: ES0 0
-      label: Spain
-      members: [ES0 0, ES6 0]
-    - code: FR0 0
-      label: France
-      members: [FR0 0, FR5 0]
-    - code: GB2 0
-      label: Great Britain
-      members: [GB2 0, GB3 0]
-    - code: IT0 0
-      label: Italy
-      members: [IT0 0, IT4 0]
+  # Country-level administrative clustering already has one node per country.
+  groups: []
 
 scenarios:
   - name: ref
@@ -95,6 +79,10 @@ scenarios:
     label: Sufficiency
     results_dir: results/suff
     resources_dir: resources/suff
+  - name: suff-nocdr
+    label: Sufficiency without CDR
+    results_dir: results/suff-nocdr
+    resources_dir: resources/suff-nocdr
 
 landing:
   scenario: ref

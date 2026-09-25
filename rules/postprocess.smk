@@ -244,6 +244,36 @@ rule plot_summary:
         scripts("plot_summary.py")
 
 
+if isinstance(config["run"]["name"], list):
+
+    rule plot_scenario_demands:
+        input:
+            energy=expand(
+                "resources/{run}/energy_totals_{horizon}.csv",
+                run=config["run"]["name"],
+                horizon=config["planning_horizons"],
+            ),
+            industry=expand(
+                "resources/{run}/industrial_energy_demand_{horizon}.csv",
+                run=config["run"]["name"],
+                horizon=config["planning_horizons"],
+            ),
+        output:
+            png="results/graphs/scenario_demands.png",
+            pdf="results/graphs/scenario_demands.pdf",
+            industry="results/graphs/scenario_industry_demands.png",
+        log:
+            "logs/plot_scenario_demands.log",
+        params:
+            runs=config["run"]["name"],
+            horizons=config["planning_horizons"],
+            energy_totals_year=config["energy"]["energy_totals_year"],
+        message:
+            "Plotting final energy demands for all scenarios"
+        script:
+            scripts("plot_scenario_demands.py")
+
+
 rule plot_balance_timeseries:
     input:
         network=RESULTS + "networks/solved_{horizon}.nc",

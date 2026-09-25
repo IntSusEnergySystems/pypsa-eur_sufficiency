@@ -53,8 +53,6 @@ class HeatSystem(Enum):
     SERVICES_URBAN_DECENTRAL = "services urban decentral"
     URBAN_CENTRAL = "urban central"
 
-    def __init__(self, *args):
-        super().__init__(*args)
 
     def __str__(self) -> str:
         """

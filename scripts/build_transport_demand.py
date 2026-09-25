@@ -18,7 +18,6 @@ from scripts._helpers import (
     configure_logging,
     generate_periodic_profiles,
     get_snapshots,
-    is_reference_run,
     is_sufficiency_run,
     set_scenario_config,
 )
@@ -48,7 +47,11 @@ def build_nodal_transport_data(fn, pop_layout, year):
 
 def build_transport_demand(traffic_fn, airtemp_fn, nodes, nodal_transport_data):
     """
-    Returns transport demand per bus in unit km driven [100 km].
+    Return land-transport demand per bus.
+
+    The reference case converts historical energy to vehicle-km, including the
+    ICE heating correction, so later drivetrain efficiencies can be applied.
+    Sufficiency demands stay as CLEVER final energy.
     """
     # averaged weekly counts from the year 2010-2015
     traffic = pd.read_csv(traffic_fn, skiprows=2, usecols=["count"]).squeeze("columns")
@@ -60,6 +63,10 @@ def build_transport_demand(traffic_fn, airtemp_fn, nodes, nodal_transport_data):
         weekly_profile=traffic.values,
     )
     transport_shape = transport_shape / transport_shape.sum()
+
+    if is_sufficiency_run(snakemake.config):
+        energy_totals_transport = pop_weighted_energy_totals["total road"]
+        return transport_shape.multiply(energy_totals_transport) * 1e6 * nyears
 
     # get heating demand for correction to demand time series
     temperature = xr.open_dataarray(airtemp_fn).to_pandas()
@@ -78,11 +85,6 @@ def build_transport_demand(traffic_fn, airtemp_fn, nodes, nodal_transport_data):
 
     # average fuel efficiency in MWh/100 km
     eff = nodal_transport_data["average fuel efficiency"]
-
-    # Sufficiency demands are already final energy (TWh), not vehicle-km.
-    if is_sufficiency_run(snakemake.config):
-        energy_totals_transport = pop_weighted_energy_totals["total road"]
-        return transport_shape.multiply(energy_totals_transport) * 1e6 * nyears
 
     energy_totals_transport = (
         pop_weighted_energy_totals["total road"]
