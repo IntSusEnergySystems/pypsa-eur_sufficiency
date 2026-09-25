@@ -180,7 +180,7 @@ electricity:
   autarky:
     enable: false
     by_country: false
-  transmission_limit: vopt
+  transmission_limit: v1.5
 
 # docs in https://pypsa-eur.readthedocs.io/en/latest/configuration.html#atlite
 atlite:
@@ -477,7 +477,7 @@ transmission_projects:
   - under_construction
   - in_permitting
   - confirmed
-  new_link_capacity: zero
+  new_link_capacity: keep
 
 # docs in https://pypsa-eur.readthedocs.io/en/latest/configuration.html#transformers
 transformers:

@@ -60,7 +60,7 @@ clustering:
   cluster_network:
     n_clusters: 28
   temporal:
-    averaging: 60h
+    averaging: 6h
 
 solving:
   solver:

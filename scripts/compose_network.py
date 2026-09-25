@@ -17,6 +17,7 @@ from scripts._helpers import (
     set_scenario_config,
 )
 from scripts.add_brownfield import adjust_renewable_capacity_limits
+from scripts.add_transmission_projects_and_dlr import apply_tyndp_link_capacities
 from scripts.add_brownfield import main as apply_brownfield
 from scripts.add_electricity import main as add_electricity_components
 from scripts.add_electricity import (
@@ -98,6 +99,10 @@ if __name__ == "__main__":
             adjust_renewable_capacity_limits(
                 n, str(current_horizon), renewable_carriers
             )
+
+    # Planned TYNDP capacity has to be in place before the transmission cap,
+    # which sets DC p_nom_min and p_nom_max from p_nom.
+    apply_tyndp_link_capacities(n, current_horizon)
 
     prepare_network_for_solving(n, inputs, params, costs, nyears)
 

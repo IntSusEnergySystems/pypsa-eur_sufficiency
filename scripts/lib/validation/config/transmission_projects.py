@@ -52,6 +52,6 @@ class TransmissionProjectsConfig(BaseModel):
         description="Status to include into the model as list or as dict with name of project and status to include. Possible values for status are `under_construction`, `in_permitting`, `confirmed`, `planned_not_yet_permitted`, `under_consideration`.",
     )
     new_link_capacity: Literal["zero", "keep"] = Field(
-        "zero",
-        description="Whether to set the new link capacity to the provided capacity or set it to zero.",
+        "keep",
+        description="Whether to set the new link capacity to the provided capacity or set it to zero. Kept capacity is the planned TYNDP rating and is only active from the project's build year.",
     )

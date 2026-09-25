@@ -18,6 +18,82 @@ from scripts._helpers import configure_logging, set_scenario_config
 logger = logging.getLogger(__name__)
 
 
+def _planned_tyndp_capacity(projects_dir: str = "data/transmission_projects") -> pd.Series:
+    """Planned DC capacity (MW) from the transmission project tables, by project name."""
+    planned = {}
+    root = Path(projects_dir)
+    if not root.is_dir():
+        return pd.Series(dtype=float)
+    for path in sorted(root.glob("*/new_links.csv")):
+        if path.parent.name == "template":
+            continue
+        projects = pd.read_csv(path, index_col=0)
+        if "p_nom" not in projects.columns:
+            continue
+        planned.update(projects["p_nom"].dropna().astype(float).to_dict())
+    return pd.Series(planned, dtype=float)
+
+
+def apply_tyndp_link_capacities(
+    n: pypsa.Network,
+    year: int,
+    projects_dir: str = "data/transmission_projects",
+) -> None:
+    """
+    Put the planned capacity on TYNDP DC links once their build year is reached.
+
+    A project is part of planning horizon ``year`` when ``build_year <= year``.
+    Later projects are removed. ``relation/...`` links are the existing grid and
+    are left unchanged. Both directions of a project receive the same ``p_nom``.
+    """
+    if n.links.empty or "carrier" not in n.links.columns:
+        return
+
+    names = pd.Series(n.links.index.astype(str), index=n.links.index)
+    tyndp = n.links.index[n.links.carrier.eq("DC") & names.str.startswith("TYNDP")]
+    if tyndp.empty:
+        logger.info("No TYNDP DC links to update for %s", year)
+        return
+
+    planned = _planned_tyndp_capacity(projects_dir)
+    project = names[tyndp].str.replace(r"-reversed$", "", regex=True)
+    project.index = tyndp
+    capacity = project.map(planned)
+    missing = capacity.index[capacity.isna()]
+    if len(missing):
+        logger.warning(
+            "No planned capacity found for %d TYNDP links, leaving p_nom unchanged: %s",
+            len(missing),
+            ", ".join(map(str, missing[:8])),
+        )
+
+    build_year = n.links.loc[tyndp, "build_year"]
+    # Projects with no build year are not commissioned on a horizon.
+    future = tyndp[build_year.isna() | (build_year > year)]
+    ready = tyndp.difference(future)
+    known = ready[capacity.reindex(ready).notna()]
+    if len(known):
+        n.links.loc[known, "p_nom"] = capacity.loc[known].to_numpy()
+        n.links.loc[known, "p_nom_min"] = capacity.loc[known].to_numpy()
+
+    if len(future):
+        logger.info(
+            "Leaving out %d TYNDP DC links whose build year is after %s",
+            len(future),
+            year,
+        )
+        n.remove("Link", future)
+
+    online = n.links.index.intersection(ready)
+    installed = n.links.loc[online, "p_nom"].sum() / 2e3  # both directions stored
+    logger.info(
+        "TYNDP DC capacity online in %s: %.2f GW across %d links",
+        year,
+        installed,
+        len(online),
+    )
+
+
 def attach_transmission_projects(
     n: pypsa.Network, transmission_projects: list[str]
 ) -> None:

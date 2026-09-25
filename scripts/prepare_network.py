@@ -316,20 +316,14 @@ def set_line_s_max_pu(n, s_max_pu=0.7):
 
 def set_transmission_limit(n, kind, factor, costs, Nyears=1):
     links_dc_b = n.links.carrier == "DC" if not n.links.empty else pd.Series()
-
-    _lines_s_nom = (
-        np.sqrt(3)
-        * n.lines.type.map(n.line_types.i_nom)
-        * n.lines.num_parallel
-        * n.lines.bus0.map(n.buses.v_nom)
-    )
-    lines_s_nom = n.lines.s_nom.where(n.lines.type == "", _lines_s_nom)
+    # Use the capacity already stored on each asset. The line-type rating is
+    # larger than s_nom here, so a limit based on that rating allows lines to
+    # more than double before the cap applies.
+    lines_s_nom = n.lines.s_nom
+    dc_p_nom = n.links.loc[links_dc_b, "p_nom"]
 
     col = "capital_cost" if kind == "c" else "length"
-    ref = (
-        lines_s_nom @ n.lines[col]
-        + n.links.loc[links_dc_b, "p_nom"] @ n.links.loc[links_dc_b, col]
-    )
+    ref = lines_s_nom @ n.lines[col] + dc_p_nom @ n.links.loc[links_dc_b, col]
 
     set_transmission_costs(n, costs)
 
@@ -337,12 +331,23 @@ def set_transmission_limit(n, kind, factor, costs, Nyears=1):
         n.lines["s_nom_min"] = lines_s_nom
         n.lines["s_nom_extendable"] = True
 
-        n.links.loc[links_dc_b, "p_nom_min"] = n.links.loc[links_dc_b, "p_nom"]
+        n.links.loc[links_dc_b, "p_nom_min"] = dc_p_nom
         n.links.loc[links_dc_b, "p_nom_extendable"] = True
 
     if factor != "opt":
+        limit = float(factor)
+        n.lines["s_nom_max"] = lines_s_nom * limit
+        n.links.loc[links_dc_b, "p_nom_max"] = dc_p_nom * limit
+        logger.info(
+            "Capping transmission expansion at %.0f%%: AC s_nom_max = s_nom * %.2f, "
+            "DC p_nom_max = p_nom * %.2f",
+            (limit - 1.0) * 100,
+            limit,
+            limit,
+        )
+
         con_type = "expansion_cost" if kind == "c" else "volume_expansion"
-        rhs = float(factor) * ref
+        rhs = limit * ref
         n.add(
             "GlobalConstraint",
             f"l{kind}_limit",
@@ -424,7 +429,9 @@ def cap_transmission_capacity(
         and line_max_extension > 0
     ):
         logger.info(f"Limiting AC line extensions to {line_max_extension} MW")
-        n.lines["s_nom_max"] = n.lines["s_nom"] + line_max_extension
+        n.lines["s_nom_max"] = np.minimum(
+            n.lines["s_nom_max"], n.lines["s_nom"] + line_max_extension
+        )
 
     # Apply link capacity extension limit if specified
     if (
@@ -434,7 +441,10 @@ def cap_transmission_capacity(
     ):
         logger.info(f"Limiting DC link extensions to {link_max_extension} MW")
         hvdc = n.links.index[n.links.carrier == "DC"]
-        n.links.loc[hvdc, "p_nom_max"] = n.links.loc[hvdc, "p_nom"] + link_max_extension
+        n.links.loc[hvdc, "p_nom_max"] = np.minimum(
+            n.links.loc[hvdc, "p_nom_max"],
+            n.links.loc[hvdc, "p_nom"] + link_max_extension,
+        )
 
     # Apply absolute line capacity limit if specified
     if line_max is not None and np.isfinite(line_max):

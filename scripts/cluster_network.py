@@ -206,7 +206,9 @@ def apply_ac_interconnection_capacities(
 
     dc_mw = {}
     if not n.links.empty and "carrier" in n.links.columns:
-        dc = n.links[n.links.carrier.eq("DC")].copy()
+            dc = n.links[n.links.carrier.eq("DC")].copy()
+            # TYNDP projects are not part of today's net transfer capacity.
+            dc = dc[~dc.index.astype(str).str.startswith("TYNDP")]
         if not dc.empty:
             d0 = dc.bus0.map(country)
             d1 = dc.bus1.map(country)
