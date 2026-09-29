@@ -97,6 +97,9 @@ output:
   shared_maps: true
   plotly: cdn
 
+features:
+  lulucf: true
+
 plots:
   ghg_cum_by_source: false
   res_share: false

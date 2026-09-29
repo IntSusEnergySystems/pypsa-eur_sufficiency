@@ -1,132 +1,109 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-Created on Mon Aug 12 10:58:55 2024
+"""Gas self-sufficiency maps and trajectories for the three scenarios.
 
-@author: umair
+Self-sufficiency is domestic renewable gas (BioSNG, biogas upgrading and
+Sabatier) divided by total gas supply at each country. The previous ChartData
+workbooks are not produced by the current workflow.
 """
 
-import pandas as pd
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
 import geopandas as gpd
 import matplotlib.pyplot as plt
-import cartopy.crs as ccrs
+import pandas as pd
 
-regions = gpd.read_file("../resources/ref/regions_onshore_base_s_33.geojson").set_index("name")
+import common
 
-bau_ss = pd.read_excel("../results/ref/htmls/ChartData_EU.xlsx", sheet_name="Chart 7", index_col=0)
-new_index = bau_ss.iloc[1]
-bau_ss.columns = new_index
-bau_ss = bau_ss.drop(bau_ss.index[:2])
-bau_ss = bau_ss.apply(pd.to_numeric, errors='coerce').fillna(0)
-bau_gas = bau_ss["Natural gas"]
-bau_pet = bau_ss["Petroleum"]
+DOMESTIC = ["BioSNG", "BioSNG CC", "biogas to gas", "biogas to gas CC", "Sabatier"]
+SUPPLY = DOMESTIC + ["gas"]
 
-regions_bau = regions.copy()
-bau_gas_df = pd.DataFrame({
-    '2020': bau_gas.loc["2020"],
-    '2030': bau_gas.loc["2030"],
-    '2040': bau_gas.loc["2040"],
-    '2050': bau_gas.loc["2050"]
-}, index=regions_bau.index)
 
-# Assign the new columns to regions_bau
-regions_bau[['2020', '2030', '2040', '2050']] = bau_gas_df
+def country_self_sufficiency(scenario: str) -> pd.DataFrame:
+    balance = common.read_csv(scenario, "nodal_energy_balance")
+    gas = balance.loc[balance["bus_carrier"] == "gas"].copy()
+    gas = gas.loc[gas["location"] != "EU"]
+    rows = []
+    for year in common.HORIZONS:
+        year = str(year)
+        grouped = gas.groupby(["location", "carrier"])[year].sum().unstack(fill_value=0.0)
+        domestic = grouped.reindex(columns=DOMESTIC, fill_value=0.0).clip(lower=0).sum(axis=1)
+        supply = grouped.reindex(columns=SUPPLY, fill_value=0.0).clip(lower=0).sum(axis=1)
+        share = (domestic / supply.replace(0, pd.NA) * 100).fillna(0.0)
+        rows.append(share.rename(year))
+    return pd.concat(rows, axis=1)
 
-ncdr_ss = pd.read_excel("../results/suff/htmls/ChartData_EU.xlsx", sheet_name="Chart 7", index_col=0)
-new_index = ncdr_ss.iloc[1]
-ncdr_ss.columns = new_index
-ncdr_ss = ncdr_ss.drop(ncdr_ss.index[:2])
-ncdr_ss = ncdr_ss.apply(pd.to_numeric, errors='coerce').fillna(0)
-ncdr_gas = ncdr_ss["Natural gas"]
-ncdr_pet = ncdr_ss["Petroleum"]
 
-regions_ncdr = regions.copy()
-ncdr_gas_df = pd.DataFrame({
-    '2020': bau_gas.loc["2020"],
-    '2030': ncdr_gas.loc["2030"],
-    '2040': ncdr_gas.loc["2040"],
-    '2050': ncdr_gas.loc["2050"]
-}, index=regions_ncdr.index)
+def system_share(table: pd.DataFrame, scenario: str) -> pd.Series:
+    balance = common.read_csv(scenario, "energy_balance")
+    gas = balance.loc[balance["bus_carrier"] == "gas"]
+    values = {}
+    for year in common.HORIZONS:
+        column = str(year)
+        grouped = gas.groupby("carrier")[column].sum()
+        domestic = float(grouped.reindex(DOMESTIC, fill_value=0.0).clip(lower=0).sum())
+        supply = float(grouped.reindex(SUPPLY, fill_value=0.0).clip(lower=0).sum())
+        values[year] = 100.0 * domestic / supply if supply else 0.0
+    return pd.Series(values, name=common.LABELS[scenario])
 
-# Assign the new columns to regions_bau
-regions_ncdr[['2020', '2030', '2040', '2050']] = ncdr_gas_df
 
-fig, axes = plt.subplots(nrows=2, ncols=4, figsize=(15, 10), subplot_kw={"projection": ccrs.EqualEarth()}, constrained_layout=True)
-plt.subplots_adjust(left=0.05, right=0.95, top=0.95, bottom=0.15, wspace=0.1, hspace=0.3)
+def main() -> None:
+    regions = gpd.read_file(common.regions_path("ref")).set_index("name")
+    tables = {scenario: country_self_sufficiency(scenario) for scenario in common.SCENARIOS}
 
-years = ['2020', '2030', '2040', '2050']
-cmap = "RdYlGn"
-vmin = 0
-vmax = 100
-
-# Plot regions_bau in the first row
-for i, (ax, year) in enumerate(zip(axes[0], years)):
-    regions_bau.plot(
-        ax=ax,
-        column=year,
-        cmap=cmap,
-        linewidths=0,
-        legend=False,
-        vmin=vmin,
-        vmax=vmax,
+    fig = plt.figure(figsize=(14, 10))
+    grid = fig.add_gridspec(
+        len(common.SCENARIOS),
+        len(common.HORIZONS) + 1,
+        width_ratios=[1, 1, 1, 0.05],
+        wspace=0.05,
+        hspace=0.16,
+        left=0.02,
+        right=0.92,
+        top=0.90,
+        bottom=0.04,
     )
-    if year == '2020':
-        ax.set_title(f'{year}', fontsize=15)  # Just the year for 2020
-    else:
-        ax.set_title(f'Ref-{year}', fontsize=15)
-    ax.gridlines(draw_labels=False,linewidth=0.2, color='grey')
-
-# Plot regions_ncdr in the second row
-for i, (ax, year) in enumerate(zip(axes[1], years)):
-    regions_ncdr.plot(
-        ax=ax,
-        column=year,
-        cmap=cmap,
-        linewidths=0,
-        legend=False,
-        vmin=vmin,
-        vmax=vmax,
+    for row, scenario in enumerate(common.SCENARIOS):
+        data = tables[scenario]
+        for col, year in enumerate(common.HORIZONS):
+            ax = fig.add_subplot(grid[row, col])
+            frame = regions.join(data[str(year)].rename("share"), how="left")
+            frame.plot(ax=ax, column="share", cmap="RdYlGn", vmin=0, vmax=100, linewidth=0.2, edgecolor="grey")
+            ax.set_axis_off()
+            ax.set_title(f"{common.LABELS[scenario]} {year}", fontsize=11)
+    cax = fig.add_subplot(grid[:, -1])
+    fig.colorbar(
+        plt.cm.ScalarMappable(cmap="RdYlGn", norm=plt.Normalize(vmin=0, vmax=100)),
+        cax=cax,
+        label="Self-sufficiency [%]",
     )
-    if year == '2020':
-        ax.set_title(f'{year}', fontsize=15)  # Just the year for 2020
-    else:
-        ax.set_title(f'Suff-{year}', fontsize=15)
-    ax.gridlines(draw_labels=False,linewidth=0.2, color='grey')
-    
+    fig.suptitle("Gas self-sufficiency [% of gas supply]", fontsize=14)
+    print(common.savefig(fig, "self_sufficiency_maps"))
 
-# Add a common colorbar for all plots
-sm = plt.cm.ScalarMappable(cmap=cmap, norm=plt.Normalize(vmin=vmin, vmax=vmax))
-sm._A = []
-cbar = fig.colorbar(sm, ax=axes, orientation="vertical", shrink=1, pad=0.02)
-cbar.set_label("Self-Sufficiency Level [Gas] [%]", fontsize=15)
-plt.rcParams.update({'font.size': 15})
+    fig, ax = plt.subplots(figsize=(8, 5))
+    styles = {"ref": ("o", "-"), "suff": ("s", "--"), "suff-nocdr": ("D", ":")}
+    for scenario in common.SCENARIOS:
+        series = system_share(tables[scenario], scenario)
+        marker, linestyle = styles[scenario]
+        ax.plot(
+            series.index.astype(str),
+            series.values,
+            label=common.LABELS[scenario],
+            color=common.SCENARIO_COLORS[scenario],
+            marker=marker,
+            linestyle=linestyle,
+            linewidth=2.5,
+            markersize=8,
+        )
+    ax.set_ylabel("Gas self-sufficiency [%]")
+    ax.set_ylim(0, 100)
+    ax.grid(True, linestyle="--", linewidth=0.4)
+    ax.legend()
+    fig.tight_layout()
+    print(common.savefig(fig, "self_sufficiency"))
 
 
-#%%
-bau_gas.loc['2020'] = ncdr_gas.loc['2020']
-plt.figure(figsize=(15, 10))
-
-# Plot the data from bau_gas
-plt.plot(bau_gas.index, bau_gas.values, label='Reference', color='red', linestyle='--', marker='o',linewidth=4, markersize=12)
-
-# Plot the data from ncdr_gas
-plt.plot(ncdr_gas.index, ncdr_gas.values, label='Sufficiency', color='green', linestyle='--', marker='s', linewidth=4, markersize=12)
-
-# plt.plot(bau_pet.index, bau_pet.values, label='BAU [Oil]', color='red', linestyle='--', marker='s',linewidth=4, markersize=12)
-
-# # Plot the data from ncdr_gas
-# plt.plot(ncdr_pet.index, ncdr_pet.values, label='Sufficeincy [Oil]', color='green', linestyle='--', marker='s', linewidth=4, markersize=12)
-
-# Adding titles and labels
-# plt.title('Natural Gas Values Comparison')
-# plt.xlabel('Year')
-plt.ylabel('Self-Sufficiency Level [Gas] [%]')
-plt.legend()
-
-# Display the plot
-plt.grid(True)
-plt.rcParams.update({'font.size': 15})
-plt.show()
-
-#%%
-
+if __name__ == "__main__":
+    main()

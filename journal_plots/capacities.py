@@ -1,146 +1,140 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-Created on Thu Aug  8 19:23:22 2024
+"""2050 installed capacities for ref, suff and suff-nocdr."""
 
-@author: umair
-"""
+import sys
+from pathlib import Path
 
-import pandas as pd
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
 import matplotlib.pyplot as plt
-import yaml
-import numpy as np
-with open("/home/umair/pypsa-eur/config/plotting.default.yaml") as file:
-    config = yaml.safe_load(file)
-country = 'EU'
+import pandas as pd
 
-caps_reff = pd.read_csv("/home/umair/28 countries_previous/results/ref/country_csvs/EU_capacities.csv")
-caps_reff["tech"] = caps_reff["tech"].replace({
-    # "AC Transmission lines": "Transmission lines",
-    # "DC Transmission lines": "TTransmission lines",
-    # "solar": "solar PV",
-    # "transmission lines": "Transmission lines"
-})
-# caps_reff = caps_reff.groupby("tech", as_index=False)["2020"].sum()
-caps_suff = pd.read_csv(f"../results/suff/country_csvs/{country}_capacities.csv")
-caps_bau = pd.read_csv(f"../results/ref/country_csvs/{country}_capacities.csv")
-caps_reff = caps_reff[['tech', '2020']]
-caps_bau = caps_bau[['tech', '2030', '2040', '2050']]
-caps_suff = caps_suff[['tech', '2030', '2040', '2050']]
-caps_bau = caps_bau[['tech', '2050']]
-caps_bau = caps_bau.rename(columns={'2050': 'Ref'})
-caps_suff = caps_suff[['tech', '2050']]
-caps_suff = caps_suff.rename(columns={'2050': 'Suff'})
-combined_df = pd.merge(caps_reff, caps_bau, on='tech', how='outer', suffixes=('_baseline', '_ref'))
-combined_df = pd.merge(combined_df, caps_suff, on='tech', how='outer')
-combined_df = combined_df.fillna(0)
-combined_df = combined_df.set_index('tech')
-combined_df = combined_df/1000
-combined_df = combined_df.drop("DAC")
+import common
 
-caps_ref_st = pd.read_csv("/home/umair/28 countries_previous/results/ref/country_csvs/EU_storage_capacities.csv")
-caps_bau_st = pd.read_csv(f"../results/ref/country_csvs/{country}_storage_capacities.csv")
-caps_suff_st = pd.read_csv(f"../results/suff/country_csvs/{country}_storage_capacities.csv")
-# if "2020" not in caps_bau_st.columns:
-#     # create a 2020 column with zeros
-#     caps_bau_st["2020"] = 0
-caps_reff_st = caps_ref_st[['tech', '2020']]
-caps_bau_st = caps_bau_st[['tech', '2030', '2040', '2050']]
-caps_suff_st = caps_suff_st[['tech', '2030', '2040', '2050']]
-caps_bau_st = caps_bau_st[['tech', '2050']]
-caps_bau_st = caps_bau_st.rename(columns={'2050': 'Ref'})
-caps_suff_st = caps_suff_st[['tech', '2050']]
-caps_suff_st = caps_suff_st.rename(columns={'2050': 'Suff'})
-combined_df_st = pd.merge(caps_reff_st, caps_bau_st, on='tech', how='outer', suffixes=('_baseline', '_bau'))
-combined_df_st = pd.merge(combined_df_st, caps_suff_st, on='tech', how='outer')
-combined_df_st = combined_df_st.fillna(0)
-combined_df_st = combined_df_st.set_index('tech')
-combined_df_st = combined_df_st/1000
-# combined_df_st = combined_df_st.drop("H2")
-
-combined_total_df = pd.concat([combined_df, combined_df_st])
-new_entries = {
-    'DAC': {'2020':0,'Ref': 20, 'Suff': 0},
-    'BECCS': {'2020':0,'Ref': 119, 'Suff': 0},
-    'Gas CC': {'2020':0,'Ref': 31, 'Suff': 0}
-}
-
-# Convert the dictionary to a DataFrame
-new_df = pd.DataFrame(new_entries).T
-combined_total_df = pd.concat([combined_total_df, new_df])
-combined_total_df = combined_total_df.rename(index={
-    "gas pipeline new": "gas pipeline"
-})
-combined_total_df = combined_total_df.groupby(combined_total_df.index).sum()
-
-tech_colors = config["plotting"]["tech_colors"]
-colors = config["plotting"]["tech_colors"]
-colors["Thermal Energy Storage"] = '#f3afa3'
-colors["Transmission lines"] = 'green'
-colors["Grid-scale battery"] = 'lightgreen'
-colors["home battery"] = 'blue'
-colors["H2 pipeline"] = 'slateblue'
-colors["gas pipeline"] = 'grey'
-colors["BECCS"] = '#889717'
-colors["Gas CC"] = '#f18959'
-
-groups = [
-    ["solar","onshore wind", "offshore wind"],
-    ["nuclear", "CCGT", "hydroelectricity"],
-    ["power-to-gas", "power-to-heat", "power-to-liquid"],
-    ["transmission lines", "H2 & gas pipelines", "CO2 pipeline"],
-    ["H2 Store","Grid-scale battery", "Thermal Energy Storage"],
-    ["DAC","BECCS", "Gas CC"],
-    
+GROUPS = [
+    {
+        "title": "Capacity for VRE technologies [GW]",
+        "scale": 1e3,
+        "techs": {
+            "solar": ["solar", "solar rooftop", "solar-hsat"],
+            "onshore wind": ["onwind"],
+            "offshore wind": ["offwind-ac", "offwind-dc", "offwind-float"],
+        },
+    },
+    {
+        "title": "Capacity for dispatchable technologies [GW]",
+        "scale": 1e3,
+        "techs": {
+            "nuclear": ["nuclear"],
+            "CCGT": ["CCGT"],
+            "hydroelectricity": ["hydro", "ror"],
+        },
+    },
+    {
+        "title": "Capacity for conversion technologies [GW]",
+        "scale": 1e3,
+        "techs": {
+            "power-to-gas": ["H2 Electrolysis", "Sabatier", "methanolisation"],
+            "power-to-heat": [
+                "rural air heat pump",
+                "rural ground heat pump",
+                "urban central air heat pump",
+                "urban decentral air heat pump",
+                "rural resistive heater",
+            ],
+            "power-to-liquid": ["Fischer-Tropsch", "biomass to liquid", "biomass to liquid CC"],
+        },
+    },
+    {
+        "title": "Capacity for grid infrastructure [GW]",
+        "scale": 1e3,
+        "techs": {
+            "transmission lines": ["AC", "DC"],
+            "H2 pipeline": ["H2 pipeline", "H2 pipeline retrofitted"],
+            "gas pipeline": ["gas pipeline", "gas pipeline new"],
+        },
+    },
+    {
+        "title": "Capacity for storage technologies [GWh]",
+        "scale": 1e3,
+        "techs": {
+            "H2 Store": ["H2 Store"],
+            "Grid-scale battery": ["battery"],
+            "home battery": ["home battery"],
+        },
+    },
+    {
+        "title": "Carbon management nameplate capacity [GW]",
+        "scale": 1e3,
+        "techs": {
+            # BECCS is capture on solid biomass that is only extendable when
+            # sequestration is allowed. suff-nocdr sets those to zero.
+            # Biogas upgrading with capture stays on: its CO2 goes to
+            # co2 stored and is used by Fischer-Tropsch, with no sequestration.
+            "DAC": ["DAC"],
+            "BECCS": [
+                "biomass to liquid CC",
+                "BioSNG CC",
+                "urban central solid biomass CHP CC",
+                "solid biomass for industry CC",
+            ],
+            "Gas CC": ["SMR CC", "gas for industry CC"],
+        },
+    },
 ]
 
 
-y_labels = [
-    "Capacity for VRE Technologies [GW]",
-    "Capacity for Disptachable Technologies [GW]",
-    "Capacity for Conversion Technologies [GW]",
-    "Capacity for Grid Infrastructure [GW]",
-    "Capacity for Storage Technologies [GWh]",
-    "Capacity for CC Technologies [Mtons/year]",
-]
-y_limits = [
-    (0, 2700),  # For Renewable Energy
-    (0, 300),  # For Conventional Energy
-    (0, 1000),   # For Energy Conversion
-    (0, 1000),  # For Grid Infrastructure
-    (0, 27000),  # For Grid Infrastructure
-    (0, 150),  # For Grid Infrastructure
-]
-fig, axes = plt.subplots(2, 3, figsize=(15, 11))
+def _sum_carriers(frame: pd.DataFrame, carriers: list[str]) -> float:
+    selected = frame.loc[frame["carrier"].isin(carriers), "2050"]
+    if selected.empty:
+        return 0.0
+    return float(selected.sum())
 
-# Flatten axes array for easier indexing
-axes = axes.flatten()
 
-# Iterate over each group and corresponding subplot axis
-for i, group in enumerate(groups):
-    # Filter the combined_total_df to get the data for the current group
-    group_df = combined_total_df.loc[group]
-    
-    # Plot a bar plot for the group
-    group_df.T.plot(kind='bar', ax=axes[i], color=[colors.get(tech, 'grey') for tech in group_df.index], width=0.6)
-    
-    # Set the y-axis label for each subplot
-    axes[i].set_ylabel(y_labels[i], fontsize=15)
-    
-    # Set y-axis limits
-    axes[i].set_ylim(y_limits[i])
-    
-    # Set tick parameters for better readability
-    axes[i].tick_params(axis='both', which='major', labelsize=15)
-    
-    # Add grid lines
-    axes[i].grid(True, which='both', axis='both', linestyle='--', linewidth=0.3)
-    
-    # Adjust the legend
-    legend = axes[i].get_legend()
-    legend.set_title(None)
-    plt.setp(legend.get_texts(), fontsize=15)
+def scenario_table(scenario: str) -> pd.DataFrame:
+    caps = common.read_csv(scenario, "capacities")
+    rows = []
+    for group in GROUPS:
+        for label, carriers in group["techs"].items():
+            rows.append(
+                {
+                    "group": group["title"],
+                    "tech": label,
+                    "value": _sum_carriers(caps, carriers) / group["scale"],
+                }
+            )
+    return pd.DataFrame(rows)
 
-plt.tight_layout()
-plt.show()
 
+def main() -> None:
+    colors = common.tech_colors()
+    tables = {scenario: scenario_table(scenario) for scenario in common.SCENARIOS}
+    fig, axes = plt.subplots(2, 3, figsize=(16, 10))
+    for ax, group in zip(axes.flatten(), GROUPS):
+        pieces = []
+        for scenario in common.SCENARIOS:
+            part = tables[scenario]
+            part = part.loc[part["group"] == group["title"]].set_index("tech")["value"]
+            part.name = common.LABELS[scenario]
+            pieces.append(part)
+        data = pd.concat(pieces, axis=1).fillna(0.0)
+        data.T.plot(
+            kind="bar",
+            ax=ax,
+            color=[colors.get(tech, "grey") for tech in data.index],
+            width=0.8,
+        )
+        ax.set_ylabel(group["title"], fontsize=11)
+        ax.set_xlabel("")
+        ax.tick_params(axis="x", labelrotation=0, labelsize=10)
+        ax.tick_params(axis="y", labelsize=10)
+        ax.grid(True, axis="y", linestyle="--", linewidth=0.3)
+        legend = ax.get_legend()
+        legend.set_title(None)
+        plt.setp(legend.get_texts(), fontsize=9)
+    fig.tight_layout()
+    print(common.savefig(fig, "capacities"))
+
+
+if __name__ == "__main__":
+    main()

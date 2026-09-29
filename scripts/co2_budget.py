@@ -7,6 +7,8 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
+import pandas as pd
+
 CO2_LIMIT_PREFIX = "CO2Limit"
 
 
@@ -70,4 +72,37 @@ def co2_budget_for_horizon(
             f"for horizon {current_horizon}."
         )
 
+    return upper, lower
+
+
+def lulucf_sink_credit(lulucf: pd.Series) -> float:
+    """Return the LULUCF sink credited to a CO2 budget.
+
+    Units follow ``lulucf`` (megatonnes in the CO2 totals file). Positive
+    LULUCF, a source, is set to zero. Negative values, a sink, are
+    sign-flipped and summed. This is the adjustment from the previous
+    global CO2 constraint, and it is not scaled by the 1990 reduction factor.
+    """
+    return float((-lulucf.clip(upper=0)).sum())
+
+
+def add_lulucf_credit(
+    upper: float | None,
+    lower: float | None,
+    credit: float,
+) -> tuple[float | None, float | None]:
+    """Add a LULUCF sink credit to each active CO2 bound.
+
+    ``credit`` is in the same units as the bounds. Both bounds move by the
+    same amount, so a feasible gap between them stays feasible.
+    """
+    if upper is not None:
+        upper = upper + credit
+    if lower is not None:
+        lower = lower + credit
+    if lower is not None and upper is not None and lower >= upper:
+        raise ValueError(
+            f"Lower bound ({lower}) must be less than upper bound ({upper}) "
+            "after adding the LULUCF credit."
+        )
     return upper, lower

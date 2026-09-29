@@ -31,9 +31,11 @@ from scripts._helpers import (
 )
 from scripts.add_electricity import set_transmission_costs
 from scripts.co2_budget import (
+    add_lulucf_credit,
     bound_value_for_horizon,
     co2_budget_for_horizon,
     co2_limit_name,
+    lulucf_sink_credit,
 )
 from scripts.prepare_sector_network import co2_emissions_year, set_temporal_aggregation
 
@@ -217,6 +219,21 @@ def apply_co2_budget_constraints(
         current_horizon=current_horizon,
         baseline_1990=baseline_1990,
     )
+
+    co2_totals_path = getattr(inputs, "co2_totals_name", None)
+    if co2_totals_path and (upper is not None or lower is not None):
+        co2_totals = pd.read_csv(co2_totals_path, index_col=0)
+        if "LULUCF" in co2_totals.columns and nyears:
+            # Mt in the totals file. The sink is added once, while
+            # add_co2limit multiplies the annual bound by nyears, so the
+            # annual credit is the sink divided by nyears.
+            lulucf = co2_totals.reindex(params.countries)["LULUCF"].fillna(0)
+            credit_gt = lulucf_sink_credit(lulucf) * 0.001 / nyears
+            logger.info(
+                f"Adding LULUCF sink of {credit_gt * nyears:.4f} Gt "
+                f"to the CO2 budget for {current_horizon}."
+            )
+            upper, lower = add_lulucf_credit(upper, lower, credit_gt)
 
     is_last_horizon = current_horizon == horizons[-1]
     elec_only = not params.sector["enabled"]

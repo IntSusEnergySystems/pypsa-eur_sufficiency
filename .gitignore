@@ -58,7 +58,7 @@ data/costs_*.csv
 dask-worker-space/
 publications.jrc.ec.europa.eu/
 d1gam3xoknrgr2.cloudfront.net/
-
+/journal_plots/.cache
 *.org
 
 *.nc
@@ -100,3 +100,5 @@ doc/img/intro-workflow.svg
 # pixi environments
 .pixi/*
 !.pixi/config.toml
+
+journal_plots/output/

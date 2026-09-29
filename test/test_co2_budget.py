@@ -4,10 +4,14 @@
 
 import pytest
 
+import pandas as pd
+
 from scripts.co2_budget import (
+    add_lulucf_credit,
     bound_value_for_horizon,
     co2_budget_for_horizon,
     co2_limit_name,
+    lulucf_sink_credit,
 )
 
 
@@ -85,6 +89,23 @@ def test_co2_budget_for_horizon_lower_without_upper():
 )
 def test_co2_limit_name(bound, horizon, expected):
     assert co2_limit_name(bound, horizon) == expected
+
+
+def test_lulucf_sink_credit_drops_sources_and_flips_sinks():
+    lulucf = pd.Series({"DE": -30.0, "DK": 6.0, "FR": -10.0})
+    assert lulucf_sink_credit(lulucf) == 40.0
+
+
+def test_add_lulucf_credit_shifts_both_bounds():
+    upper, lower = add_lulucf_credit(5.0, 1.0, 0.4)
+    assert upper == 5.4
+    assert lower == 1.4
+
+
+def test_add_lulucf_credit_skips_missing_bound():
+    upper, lower = add_lulucf_credit(5.0, None, 0.4)
+    assert upper == 5.4
+    assert lower is None
 
 
 def test_co2_budget_for_horizon_rejects_lower_greater_equal_upper():

@@ -815,11 +815,8 @@ rule build_co2_totals:
 rule apply_clever_co2_totals:
     input:
         co2_totals=resources("co2_totals.csv"),
-        clever_afolub=lambda w: (
-            f"data/clever_AFOLUB_{w.horizon}.csv"
-            if is_sufficiency_run(get_config(w))
-            else []
-        ),
+        # LULUCF is the CLEVER land-use sink in every scenario, including ref.
+        clever_afolub="data/clever_AFOLUB_{horizon}.csv",
     output:
         co2_totals=resources("co2_totals_{horizon}.csv"),
     log:

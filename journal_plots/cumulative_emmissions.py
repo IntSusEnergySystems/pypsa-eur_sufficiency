@@ -1,140 +1,233 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-Created on Sat Aug  3 17:16:45 2024
+"""Cumulative CO2 by sector for ref, suff and suff-nocdr.
 
-@author: umair
+Annual flows come from the atmospheric ``co2`` bus. Each solved year stands
+for a ten-year period, and the area chart is the running sum of those
+periods through 2050.
 """
 
-import pandas as pd
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
 import matplotlib.pyplot as plt
+import pandas as pd
+from matplotlib.lines import Line2D
 
+import common
 
-# Load configuration data
-config = pd.read_excel("../SEPIA/SEPIA_config.xlsx", sheet_name="NODES", index_col=0)
-config = config[config['Type'] == 'GHG_SECTORS']
+SECTORS = {
+    "Maritime bunkers": ["shipping oil", "shipping methanol"],
+    "Agriculture": ["agriculture machinery oil"],
+    "Transport": ["land transport oil"],
+    "Residential and tertiary sectors": [
+        "rural gas boiler",
+        "rural oil boiler",
+        "urban decentral gas boiler",
+        "urban decentral oil boiler",
+        "urban central gas boiler",
+    ],
+    "Heat and power production": [
+        "CCGT",
+        "OCGT",
+        "coal",
+        "lignite",
+        "urban central gas CHP",
+        "urban central gas CHP CC",
+        "waste CHP",
+        "waste CHP CC",
+    ],
+    "Aviation bunkers": ["kerosene for aviation"],
+    "Industry": [
+        "gas for industry",
+        "gas for industry CC",
+        "coal for industry",
+        "process emissions",
+        "process emissions CC",
+        "HVC to air",
+        "naphtha for industry",
+        "SMR",
+        "SMR CC",
+    ],
+    "Biogas": ["biogas to gas", "biogas to gas CC"],
+    "Biomass": [
+        "biomass to liquid",
+        "biomass to liquid CC",
+        "BioSNG",
+        "BioSNG CC",
+        "solid biomass for industry",
+        "solid biomass for industry CC",
+    ],
+    "DACCS": ["DAC"],
+    "Land use and forestry": [],
+}
 
-code_to_label = config['Label'].to_dict()
-
-# Load and preprocess data
-bau = pd.read_csv("../results/ref/country_csvs/ghg_sector_cum_EU.csv", index_col=0)
-ncdr = pd.read_csv("../results/suff/country_csvs/ghg_sector_cum_EU.csv", index_col=0)
-
-# Rename columns and preprocess bau
-bau.rename(columns=code_to_label, inplace=True)
-bau['Industry'] = bau[['Other energy industry', 'Industrial processes', 'Fuel usage - industry']].sum(axis=1)
-bau = bau.drop(columns=['Other energy industry', 'Industrial processes', 'Fuel usage - industry'])
-bau = bau.rename(columns={"Fuel combustion - agriculture": "Agriculture", "Fuel combustion - transport": "Transport", "Fuel combustion - aviation bunkers": "Aviation bunkers", "DAC":"DACCS","Fuel combustion - maritime bunkers":"Maritime bunkers","biogas": "Biogas","Fuel combustion – residential and tertiary":"Residential and tertiary sectors"})
-bau["Biomass"] = bau["biomass to liquid"] + bau["Biomass"]
-bau = bau.drop(columns=["biomass to liquid"])
-bau = bau.loc[:, (bau != 0).any(axis=0)]
-bau['Total'] = bau.sum(axis=1)
-bau_cumulative = bau.drop(columns='Total').cumsum() / 1000
-
-# Rename columns and preprocess ncdr
-ncdr.rename(columns=code_to_label, inplace=True)
-ncdr['Industry'] =ncdr[['Other energy industry', 'Industrial processes', 'Fuel usage - industry']].sum(axis=1)
-ncdr = ncdr.drop(columns=['Other energy industry', 'Industrial processes', 'Fuel usage - industry'])
-ncdr = ncdr.rename(columns={"Fuel combustion - agriculture": "Agriculture", "Fuel combustion - transport": "Transport", "Fuel combustion - aviation bunkers": "Aviation bunkers", "DAC":"DACCS","Fuel combustion - maritime bunkers":"Maritime bunkers","biogas": "Biogas","Fuel combustion – residential and tertiary":"Residential and tertiary sectors"})
-ncdr["Biomass"] = ncdr["biomass to liquid"] + ncdr["Biomass"]
-ncdr = ncdr.drop(columns=["biomass to liquid"])
-ncdr = ncdr.loc[:, (ncdr != 0).any(axis=0)]
-ncdr['Total'] = ncdr.sum(axis=1)
-ncdr_cumulative = ncdr.drop(columns='Total').cumsum() / 1000
-
-# Extract colors for the plot
-# colors = [config.set_index('Label').loc[label, 'Color'] for label in bau.columns if label in config['Label'].values]
-colors = {
+COLORS = {
+    "Maritime bunkers": "#f18959",
     "Agriculture": "#008556",
-    "Industry": "#feda47",
     "Transport": "#a26643",
     "Residential and tertiary sectors": "#d60a51",
-    "Maritime bunkers": "#f18959",
+    "Heat and power production": "#75519c",
     "Aviation bunkers": "#ff4d00",
-    "BECCS": "#889717",
-    "Biogas": "#dfeac2",
+    "Industry": "#feda47",
+    "Biogas": "#8a9a4a",
     "Biomass": "green",
     "DACCS": "#b1d1fc",
-    "Heat and power production ": "#75519c",
     "Land use and forestry": "#befdb7",
-    
-    
 }
-preferred_order = ['Maritime bunkers', 'Agriculture', 'Transport', 'Residential and tertiary sectors','Heat and power production ','Aviation bunkers', 'Industry','Biogas','Biomass','BECCS','DACCS','Land use and forestry']
-actual_order_bau = [col for col in preferred_order if col in bau_cumulative.columns]
-actual_order_ncdr = [col for col in preferred_order if col in ncdr_cumulative.columns]
-bau_cumulative = bau_cumulative[actual_order_bau]
-ncdr_cumulative = ncdr_cumulative[actual_order_ncdr]
-# Create subplots (2x2 grid)
-fig, axs = plt.subplots(nrows=2, ncols=2, figsize=(15, 10), gridspec_kw={'width_ratios': [1.6, 1]})
-# Plot the area chart for bau on the first subplot (axs[0, 0])
-bau_cumulative.plot(kind='area', stacked=True, alpha=0.5, color=colors, ax=axs[0, 0])
-bau_cumulative['Total'] = bau_cumulative.sum(axis=1)
-bau_cumulative['Total'].plot(kind='line', color='black', linewidth=2, ax=axs[0, 0])
-axs[0, 0].set_xticks([2020, 2030, 2040, 2050])
-axs[0, 0].set_xlim(2020, 2050)
-axs[0, 0].set_ylim(-40, 60)
-axs[0, 0].set_ylabel('Cumulative Emissions [GtCO2 eq]', fontsize=15)
-axs[0, 0].grid(True)
-axs[0, 0].tick_params(axis='both', labelsize=15)
-axs[0, 0].get_legend().remove()
 
-# Plot the bar chart for bau on the second subplot (axs[0, 1])
-values_2050_bau = bau_cumulative.loc[2050]
-# colors_2050_bau = [config.set_index('Label').loc[label, 'Color'] for label in values_2050_bau.index if label in config['Label'].values]
-bar_colors_bau = [colors.get(label, "#000000") for label in values_2050_bau.index]
-bars_bau = axs[0, 1].bar(values_2050_bau.index, values_2050_bau,alpha=0.5, color=bar_colors_bau)
-# axs[0, 1].set_ylabel('Cumulative Emissions [GtCO2 eq]', fontsize=15)
-axs[0, 1].tick_params(axis='x', rotation=90)
-axs[0, 1].grid(True)
-axs[0, 1].set_xticks([])
-axs[0, 1].set_ylim(-15, 35)
-axs[0, 1].tick_params(axis='both', labelsize=15)
-for bar in bars_bau:
-    height = bar.get_height()
-    axs[0, 1].text(bar.get_x() + bar.get_width() / 2, height, f'{height:.1f}', 
-                    ha='center', va='bottom', fontsize=12, color='black')
+BAR_SECTORS = list(SECTORS)
 
-# Plot the area chart for ncdr on the third subplot (axs[1, 0])
-# colors_ncdr = [config.set_index('Label').loc[label, 'Color'] for label in ncdr.columns if label in config['Label'].values]
-ncdr_cumulative.plot(kind='area', stacked=True, alpha=0.5, color=colors, ax=axs[1, 0])
-ncdr_cumulative['Total'] = ncdr_cumulative.sum(axis=1)
-ncdr_cumulative['Total'].plot(kind='line', color='black', linewidth=2, ax=axs[1, 0])
-axs[1, 0].set_xticks([2020, 2030, 2040, 2050])
-axs[1, 0].set_xlim(2020, 2050)
-axs[1, 0].set_ylim(-40, 60)
-axs[1, 0].set_ylabel('Cumulative Emissions [GtCO2 eq]', fontsize=15)
-axs[1, 0].grid(True)
-axs[1, 0].tick_params(axis='both', labelsize=15)
-axs[1, 0].get_legend().remove()
 
-# Plot the bar chart for ncdr on the fourth subplot (axs[1, 1])
-values_2050_ncdr = ncdr_cumulative.loc[2050]
-bar_colors_ncdr = [colors.get(label, "#000000") for label in values_2050_ncdr.index]
-# colors_2050_ncdr = [config.set_index('Label').loc[label, 'Color'] for label in values_2050_ncdr.index if label in config['Label'].values]
-bars_ncdr = axs[1, 1].bar(values_2050_ncdr.index, values_2050_ncdr,alpha=0.5, color=bar_colors_ncdr)
-# axs[1, 1].set_ylabel('Cumulative Emissions [GtCO2 eq]', fontsize=15)
-axs[1, 1].tick_params(axis='x', rotation=90)
-axs[1, 1].grid(True)
-axs[1, 1].set_xticks([])
-axs[1, 1].set_ylim(-15, 35)
-axs[1, 1].tick_params(axis='both', labelsize=15)
-for bar in bars_ncdr:
-    height = bar.get_height()
-    axs[1, 1].text(bar.get_x() + bar.get_width() / 2, height, f'{height:.1f}', 
-                    ha='center', va='bottom', fontsize=12, color='black')
+def lulucf_emissions_gt(year: int) -> float:
+    """Annual land-use CO2 in Gt from the CLEVER AFOLU file for that year.
 
-handles, labels = axs[0, 0].get_legend_handles_labels()
-# Create a separate axis for the legend
-ax_legend = fig.add_axes([0.5, 0.05, 0.8, 0.2], frameon=False)
-fig.legend(handles, labels, loc='center', bbox_to_anchor=(0.52, 0.09), ncol=5, fontsize=15, labelspacing=1, handletextpad=1.0)
+    The same series is used for every scenario, including reference. Sources
+    are set to zero and sinks are kept, so the series is negative and reduces
+    cumulative CO2. CLEVER values are megatonnes.
+    """
+    clever = pd.read_csv(common.ROOT / "data" / f"clever_AFOLUB_{year}.csv", index_col=0)
+    countries = pd.read_csv(common.ROOT / "resources" / "ref" / "co2_totals.csv", index_col=0).index
+    lulucf = clever.reindex(countries)["Total CO2 emissions from the LULUCF sector"]
+    return float(lulucf.fillna(0).clip(upper=0).sum()) * 0.001
 
-# Hide the legend axis
-ax_legend.axis('off')
 
-axs[0, 0].set_title('(a)   Cumulative CO2 Emissions by Sector in Reference Scenario', fontsize=15)
-axs[1, 0].set_title('(b)   Cumulative CO2 Emissions by Sector in Sufficiency Scenario', fontsize=15)
-# Adjust layout to fit all plots and the legend
-plt.tight_layout(rect=[0, 0.15, 1, 1])  # Adjust the space to fit all plots and the legend
+def historic_2020_gt(scenario: str) -> pd.Series:
+    """EU27 UNFCCC CO2 in 2020, from the JRC-IDEES comparison workbook.
 
-plt.show()
+    Values are kilotonnes in that sheet. Biogas, biomass and DACCS are not
+    reported separately in the inventory. Land use comes from the same
+    LULUCF sink used in the CO2 budget.
+    """
+    path = (
+        common.ROOT
+        / "data/jrc_idees/archive/2024-05-20/EU27/JRC-IDEES-2021_EmissionsComparison_UNFCCC.xlsx"
+    )
+    sheet = pd.read_excel(path, sheet_name="EU27", header=None)
+    years = [int(float(value)) for value in sheet.iloc[0, 1:]]
+    column = 1 + years.index(2020)
+
+    def kt(row: int) -> float:
+        return float(sheet.iloc[row, column])
+
+    values = {
+        "Maritime bunkers": kt(21) + kt(46),
+        "Agriculture": kt(26) + kt(41),
+        "Transport": kt(19) + kt(20) + kt(22),
+        "Residential and tertiary sectors": kt(24) + kt(25),
+        "Heat and power production": kt(6),
+        "Aviation bunkers": kt(18) + kt(45),
+        "Industry": kt(7) + kt(8) + kt(9) + kt(30) + kt(32) + kt(42),
+        "Biogas": 0.0,
+        "Biomass": 0.0,
+        "DACCS": 0.0,
+        "Land use and forestry": 0.0,
+    }
+    series = pd.Series(values).reindex(list(SECTORS)).fillna(0.0) / 1e6
+    series["Land use and forestry"] = lulucf_emissions_gt(2020)
+    return series
+
+
+def annual_gt(scenario: str) -> pd.DataFrame:
+    balance = common.read_csv(scenario, "energy_balance")
+    co2 = balance.loc[balance["bus_carrier"] == "co2"]
+    rows = {}
+    for sector, carriers in SECTORS.items():
+        if not carriers:
+            rows[sector] = pd.Series(0.0, index=[str(year) for year in common.HORIZONS])
+            continue
+        selected = co2.loc[co2["carrier"].isin(carriers), [str(year) for year in common.HORIZONS]]
+        rows[sector] = selected.sum()
+    frame = pd.DataFrame(rows)
+    frame.index = frame.index.astype(int)
+    frame = frame.reindex(columns=list(SECTORS)) / 1e9
+    frame["Land use and forestry"] = [lulucf_emissions_gt(year) for year in frame.index]
+    return frame
+
+
+def cumulative_gt(annual: pd.DataFrame, scenario: str) -> pd.DataFrame:
+    """Cumulative CO2 from 2020, interpolating the solved years.
+
+    2020 is the historical inventory. Later years are the solved energy
+    balance. The path between snapshots is linear, and each calendar year
+    is added once.
+    """
+    frame = annual.copy()
+    frame.loc[2020] = historic_2020_gt(scenario)
+    frame = frame.sort_index()
+    yearly = frame.reindex(range(2020, 2051)).interpolate(method="index")
+    return yearly.cumsum()
+
+
+def main() -> None:
+    series = {
+        scenario: cumulative_gt(annual_gt(scenario), scenario) for scenario in common.SCENARIOS
+    }
+    area_high = max(frame.clip(lower=0).sum(axis=1).max() for frame in series.values())
+    area_low = min(frame.clip(upper=0).sum(axis=1).min() for frame in series.values())
+    area_pad = 0.08 * max(abs(area_high), abs(area_low), 1.0)
+    bar_values = [frame.loc[2050, BAR_SECTORS] for frame in series.values()]
+    bar_high = max(values.max() for values in bar_values)
+    bar_low = min(values.min() for values in bar_values)
+    bar_pad = 0.18 * max(abs(bar_high), abs(bar_low), 1.0)
+
+    fig, axes = plt.subplots(
+        len(common.SCENARIOS),
+        2,
+        figsize=(18, 16),
+        gridspec_kw={"width_ratios": [1.6, 1]},
+    )
+    for row, scenario in enumerate(common.SCENARIOS):
+        cumulative = series[scenario]
+        colors = [COLORS[name] for name in cumulative.columns]
+        cumulative.plot(kind="area", stacked=True, ax=axes[row, 0], color=colors, legend=False, alpha=0.7)
+        total = cumulative.sum(axis=1)
+        axes[row, 0].plot(total.index, total.values, color="black", linewidth=2.0, label="Total")
+        axes[row, 0].axhline(0, color="black", linewidth=0.6)
+        axes[row, 0].set_ylabel("Cumulative CO2 [Gt]", fontsize=14)
+        axes[row, 0].set_title(f"{common.LABELS[scenario]}", fontsize=15, loc="left")
+        axes[row, 0].set_xticks([2020, 2030, 2040, 2050])
+        axes[row, 0].set_ylim(area_low - area_pad, area_high + area_pad)
+        axes[row, 0].grid(True, axis="y", linestyle="--", linewidth=0.3)
+        axes[row, 0].tick_params(labelsize=16)
+
+        values = cumulative.loc[2050, BAR_SECTORS]
+        bar_colors = [COLORS[name] for name in values.index]
+        bars = axes[row, 1].bar(
+            range(len(values)),
+            values.values,
+            color=bar_colors,
+            alpha=0.9,
+            width=0.55,
+            edgecolor="0.3",
+            linewidth=0.4,
+        )
+        axes[row, 1].set_xticks(range(len(values)))
+        axes[row, 1].set_xticklabels([])
+        axes[row, 1].set_xlim(-0.7, len(values) - 0.3)
+        axes[row, 1].set_ylim(bar_low - bar_pad, bar_high + bar_pad)
+        axes[row, 1].axhline(0, color="black", linewidth=0.6)
+        axes[row, 1].grid(True, axis="y", linestyle="--", linewidth=0.3)
+        axes[row, 1].set_title("Cumulative to 2050", fontsize=15)
+        axes[row, 1].tick_params(labelsize=16)
+        for bar in bars:
+            height = bar.get_height()
+            axes[row, 1].text(
+                bar.get_x() + bar.get_width() / 2,
+                height,
+                f"{height:.2f}",
+                ha="center",
+                va="bottom" if height >= 0 else "top",
+                fontsize=11,
+            )
+
+    handles = [plt.Rectangle((0, 0), 1, 1, color=COLORS[name]) for name in SECTORS]
+    handles.append(Line2D([0], [0], color="black", linewidth=2))
+    fig.legend(handles, list(SECTORS) + ["Total"], loc="lower center", ncol=4, frameon=False, fontsize=12)
+    fig.tight_layout(rect=[0, 0.08, 1, 1])
+    print(common.savefig(fig, "cumulative_emissions"))
+
+
+if __name__ == "__main__":
+    main()
