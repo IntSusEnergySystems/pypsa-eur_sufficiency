@@ -50,12 +50,16 @@ def add_brownfield(
     """
     logger.info(f"Preparing brownfield for the year {year}")
 
-    # electric transmission grid set optimised capacities of previous as minimum
-    n.lines.s_nom_min = n_p.lines.s_nom_opt
+    # electric transmission grid set optimised capacities of previous as minimum.
+    # Later horizons add TYNDP links that were not in the previous solve.
+    line_i = n.lines.index.intersection(n_p.lines.index)
+    n.lines.loc[line_i, "s_nom_min"] = n_p.lines.loc[line_i, "s_nom_opt"]
     # Clamp s_nom_max to be at least s_nom_min to prevent solver infeasibility
     # from floating-point differences between s_nom_opt and s_nom_max
-    n.lines.s_nom_max = n.lines.s_nom_max.clip(lower=n.lines.s_nom_min)
-    dc_i = n.links[n.links.carrier == "DC"].index
+    n.lines.loc[line_i, "s_nom_max"] = n.lines.loc[line_i, "s_nom_max"].clip(
+        lower=n.lines.loc[line_i, "s_nom_min"]
+    )
+    dc_i = n.links.index[n.links.carrier == "DC"].intersection(n_p.links.index)
     n.links.loc[dc_i, "p_nom_min"] = n_p.links.loc[dc_i, "p_nom_opt"]
     n.links.loc[dc_i, "p_nom_max"] = n.links.loc[dc_i, "p_nom_max"].clip(
         lower=n.links.loc[dc_i, "p_nom_min"]

@@ -3,6 +3,7 @@
 import pandas as pd
 import pypsa
 
+from scripts.add_brownfield import add_brownfield
 from scripts.add_transmission_projects_and_dlr import apply_tyndp_link_capacities
 from scripts.prepare_network import cap_transmission_capacity, set_transmission_limit
 
@@ -102,3 +103,55 @@ def test_tyndp_capacity_follows_build_year(tmp_path):
     later = _tyndp_network()
     apply_tyndp_link_capacities(later, 2035, projects_dir=tmp_path.as_posix())
     assert later.links.loc["TYNDP2020_late", "p_nom"] == 1000
+
+
+def test_brownfield_keeps_new_tyndp_links():
+    """DC links commissioned after the previous horizon are not looked up there."""
+
+    def network(with_new_project: bool) -> pypsa.Network:
+        n = pypsa.Network()
+        n.add("Bus", ["A", "B"])
+        n.add("Line", "ac", bus0="A", bus1="B", s_nom=1000, s_nom_max=1500)
+        n.add(
+            "Link",
+            "relation/1-DC",
+            bus0="A",
+            bus1="B",
+            carrier="DC",
+            p_nom=400,
+            p_nom_min=400,
+            p_nom_max=600,
+            build_year=2020,
+            lifetime=40,
+        )
+        if with_new_project:
+            n.add(
+                "Link",
+                ["TYNDP2024_153", "TYNDP2024_153-reversed"],
+                bus0=["A", "B"],
+                bus1=["B", "A"],
+                carrier="DC",
+                p_nom=700,
+                p_nom_min=700,
+                p_nom_max=1050,
+                build_year=2031,
+                lifetime=40,
+            )
+        return n
+
+    previous = network(with_new_project=False)
+    previous.lines["s_nom_opt"] = 1100
+    previous.links["p_nom_opt"] = 450
+    current = network(with_new_project=True)
+
+    add_brownfield(
+        current,
+        previous,
+        2040,
+        h2_retrofit=False,
+        capacity_threshold=10,
+    )
+
+    assert current.links.loc["relation/1-DC", "p_nom_min"] == 450
+    assert current.links.loc["TYNDP2024_153", "p_nom"] == 700
+    assert current.links.loc["TYNDP2024_153", "p_nom_min"] == 700

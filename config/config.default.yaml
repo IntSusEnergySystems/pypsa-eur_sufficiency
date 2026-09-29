@@ -999,10 +999,10 @@ sector:
     OCGT: gas
     CCGT: gas
   biomass_to_liquid: true
-  biomass_to_liquid_cc: true
+  biomass_to_liquid_cc: false
   electrobiofuels: false
   biosng: true
-  biosng_cc: true
+  biosng_cc: false
   bioH2: false
   municipal_solid_waste: false
   limit_max_growth:
