@@ -11,6 +11,7 @@ import xarray as xr
 
 from scripts.add_electricity import (
     apply_nuclear_capacity,
+    nuclear_capacity_by_country,
     attach_conventional_generators,
     attach_load,
     load_and_aggregate_powerplants,
@@ -87,13 +88,50 @@ def test_nuclear_aggregated_once_per_bus(tmp_path):
     assert ppl.loc["CZ coal", "p_nom"] == 400
 
 
-def test_apply_nuclear_capacity_replaces_powerplant_values(tmp_path):
-    """Horizon table overwrites generator MW and collapses duplicate units."""
-
-    table = tmp_path / "nuclear_capacity.csv"
-    table.write_text(
-        "# comment\ncountry,2030,2040,2050\nBE,2000,0,0\nCZ,4164,2164,2164\n"
+def _powerplants_csv(path) -> str:
+    plants = pd.DataFrame(
+        {
+            "Fueltype": ["Nuclear", "Nuclear", "Nuclear", "Nuclear", "Hard Coal"],
+            "Country": ["BE", "CZ", "CZ", "FR", "CZ"],
+            "Capacity": [1090.0, 2000.0, 2164.0, 1000.0, 400.0],
+            "DateIn": [1985, 1985, 2002, 1980, 2000],
+            "DateRetrofit": [np.nan, np.nan, np.nan, 2005, np.nan],
+            "DateOut": [np.nan, 2037, np.nan, np.nan, 2040],
+            "Name": ["Doel 4", "Dukovany", "Temelin", "retrofit", "coal"],
+        }
     )
+    plants.to_csv(path, index=False)
+    return path.as_posix()
+
+
+def test_nuclear_capacity_follows_decommissioning_date(tmp_path):
+    """Missing DateOut is filled, then units retiring before the horizon drop.
+
+    No retrofit: DateIn + 40. Retrofit: DateRetrofit + 20. A recorded DateOut
+    is kept. A Belgian unit with no date is retired in 2035.
+    """
+
+    path = _powerplants_csv(tmp_path / "powerplants.csv")
+    filled = pd.read_csv(path)
+    online_2030 = nuclear_capacity_by_country(path, 2030)
+    online_2040 = nuclear_capacity_by_country(path, 2040)
+    online_2050 = nuclear_capacity_by_country(path, 2050)
+    assert online_2030["BE"] == 1090
+    assert "BE" not in online_2040.index
+    assert "BE" not in online_2050.index
+    # Dukovany keeps 2037; Temelin is 2002 + 40 = 2042.
+    assert online_2030["CZ"] == 4164
+    assert online_2040["CZ"] == 2164
+    assert "CZ" not in online_2050.index
+    # French unit: retrofit 2005 + 20 = 2025, retired before 2030.
+    assert "FR" not in online_2030.index
+    assert filled.loc[filled.Name == "coal", "DateOut"].iloc[0] == 2040
+
+
+def test_apply_nuclear_capacity_replaces_powerplant_values(tmp_path):
+    """Horizon filter overwrites generator MW and collapses duplicate units."""
+
+    path = _powerplants_csv(tmp_path / "powerplants.csv")
 
     n = pypsa.Network()
     n.set_snapshots(pd.date_range("2030-01-01", periods=1, freq="h"))
@@ -109,11 +147,11 @@ def test_apply_nuclear_capacity_replaces_powerplant_values(tmp_path):
         capital_cost=100,
     )
 
-    apply_nuclear_capacity(n, table.as_posix(), 2030)
+    apply_nuclear_capacity(n, path, 2030)
     nuclear = n.generators.query("carrier == 'nuclear'")
     assert set(nuclear.index) == {"BE nuclear", "CZ nuclear"}
-    assert nuclear.loc["BE nuclear", "p_nom"] == 2000
-    assert nuclear.loc["BE nuclear", "p_nom_min"] == 2000
+    assert nuclear.loc["BE nuclear", "p_nom"] == 1090
+    assert nuclear.loc["BE nuclear", "p_nom_min"] == 1090
     assert bool(nuclear.loc["BE nuclear", "p_nom_extendable"])
     assert nuclear.loc["CZ nuclear", "p_nom"] == 4164
 
@@ -121,7 +159,9 @@ def test_apply_nuclear_capacity_replaces_powerplant_values(tmp_path):
     previous.generators["p_nom_opt"] = previous.generators["p_nom"]
     previous.generators.loc["BE nuclear", "p_nom_opt"] = 2500
 
-    apply_nuclear_capacity(n, table.as_posix(), 2040, n_previous=previous)
-    assert n.generators.loc["BE nuclear", "p_nom_min"] == 500
+    apply_nuclear_capacity(n, path, 2040, n_previous=previous)
+    # Existing Belgian capacity is zero after 2035; 1410 MW is the new build.
+    assert n.generators.loc["BE nuclear", "p_nom_min"] == 1410
+    # Temelin (2042) is still online, Dukovany (2037) is not.
     assert n.generators.loc["CZ nuclear", "p_nom_min"] == 2164
     assert "CZ nuclear-2037" not in n.generators.index

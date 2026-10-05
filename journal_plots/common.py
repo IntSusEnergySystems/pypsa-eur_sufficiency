@@ -196,11 +196,12 @@ def country_vre_curtailment(scenario: str, year: int) -> pd.DataFrame:
 
 
 def _country_co2_tonnes(scenario: str, year: int) -> pd.Series:
-    """Net CO2 injected onto the atmospheric CO2 bus, by plant country.
+    """CO2 emitted onto the atmospheric CO2 bus, by plant country.
 
-    The summary tables book every CO2 bus at ``EU``. This reads the link
-    ports that connect to a ``co2`` bus and assigns the flow to the first
-    real country on the link.
+    Removals and sequestration, which withdraw CO2 from that bus, are left
+    out. The summary tables book every CO2 bus at ``EU``. This reads the
+    link ports that connect to a ``co2`` bus and assigns the flow to the
+    first real country on the link.
     """
     path = network_path(scenario, year)
     with xr.open_dataset(path) as ds:
@@ -226,6 +227,7 @@ def _country_co2_tonnes(scenario: str, year: int) -> pd.Series:
                 continue
             columns = [names.index(name) for name in co2_names]
             injected = -pd.Series(ds[time_name].values[:, columns].sum(axis=0) * weight, index=co2_names)
+            injected = injected.clip(lower=0.0)
             for name, value in injected.items():
                 location = "EU"
                 for column in bus_cols:
@@ -240,7 +242,7 @@ def _country_co2_tonnes(scenario: str, year: int) -> pd.Series:
 
 def country_co2_tonnes(scenario: str, year: int) -> pd.Series:
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
-    cache = CACHE_DIR / f"co2_{scenario}_{year}.csv"
+    cache = CACHE_DIR / f"co2_emissions_{scenario}_{year}.csv"
     if cache.exists():
         frame = pd.read_csv(cache, index_col=0)
         return frame.iloc[:, 0]

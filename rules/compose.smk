@@ -27,7 +27,6 @@ def get_compose_inputs(w):
         **input_conventional(w),
         tech_costs=resources(f"costs_{horizon}_processed.csv"),
         powerplants=resources("powerplants.csv"),
-        nuclear_capacity="data/nuclear_capacity.csv",
         hydro_capacities=ancient("data/hydro_capacities.csv"),
         unit_commitment="data/unit_commitment.csv",
         fuel_price=(

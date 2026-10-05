@@ -19,6 +19,8 @@ import common
 
 DOMESTIC = ["BioSNG", "BioSNG CC", "biogas to gas", "biogas to gas CC", "Sabatier"]
 SUPPLY = DOMESTIC + ["gas"]
+OIL_DOMESTIC = ["Fischer-Tropsch", "biomass to liquid", "biomass to liquid CC"]
+OIL_SUPPLY = OIL_DOMESTIC + ["oil refining"]
 
 
 def country_self_sufficiency(scenario: str) -> pd.DataFrame:
@@ -36,17 +38,124 @@ def country_self_sufficiency(scenario: str) -> pd.DataFrame:
     return pd.concat(rows, axis=1)
 
 
-def system_share(table: pd.DataFrame, scenario: str) -> pd.Series:
+def _system_share(scenario: str, bus: str, domestic: list[str], supply: list[str]) -> pd.Series:
     balance = common.read_csv(scenario, "energy_balance")
-    gas = balance.loc[balance["bus_carrier"] == "gas"]
+    flows = balance.loc[balance["bus_carrier"] == bus]
     values = {}
     for year in common.HORIZONS:
         column = str(year)
-        grouped = gas.groupby("carrier")[column].sum()
-        domestic = float(grouped.reindex(DOMESTIC, fill_value=0.0).clip(lower=0).sum())
-        supply = float(grouped.reindex(SUPPLY, fill_value=0.0).clip(lower=0).sum())
-        values[year] = 100.0 * domestic / supply if supply else 0.0
+        grouped = flows.groupby("carrier")[column].sum()
+        made = float(grouped.reindex(domestic, fill_value=0.0).clip(lower=0).sum())
+        total = float(grouped.reindex(supply, fill_value=0.0).clip(lower=0).sum())
+        values[year] = 100.0 * made / total if total else 0.0
     return pd.Series(values, name=common.LABELS[scenario])
+
+
+def system_share(table: pd.DataFrame, scenario: str) -> pd.Series:
+    """Domestic renewable gas as a share of gas supply."""
+    return _system_share(scenario, "gas", DOMESTIC, SUPPLY)
+
+
+def system_oil_share(scenario: str) -> pd.Series:
+    """Domestic renewable liquids as a share of oil-product supply."""
+    return _system_share(scenario, "oil", OIL_DOMESTIC, OIL_SUPPLY)
+
+
+# Eurostat energy balances, 2020, TWh. Natural gas and crude oil.
+# Switzerland is not in the Eurostat file.
+_EUROSTAT = {
+    "gas": "G3000",
+    "oil": "O4100_TOT",
+}
+
+
+def _study_countries() -> list[str]:
+    import yaml
+
+    with open(common.ROOT / "config" / "study.yaml", encoding="utf-8") as handle:
+        return list(yaml.safe_load(handle)["countries"])
+
+
+_PRODUCTION_2020 = None
+
+
+def production_2020_twh() -> dict[str, dict[str, float]]:
+    """2020 production, imports and exports of gas and crude oil, in TWh.
+
+    Summed over the study countries. Exports are kept so trade between
+    those countries cancels when self-sufficiency is formed.
+    """
+    global _PRODUCTION_2020
+    if _PRODUCTION_2020 is not None:
+        return _PRODUCTION_2020
+    countries = set(_study_countries())
+    wanted = set(_EUROSTAT.values())
+    parts = []
+    path = common.ROOT / "resources" / "ref" / "eurostat_energy_balances.csv"
+    for chunk in pd.read_csv(path, chunksize=400_000):
+        part = chunk.loc[
+            (chunk["year"] == 2020)
+            & chunk["country"].isin(countries)
+            & chunk["siec"].isin(wanted)
+            & chunk["nrg_bal"].isin(["PPRD", "IMP", "EXP"])
+        ]
+        if len(part):
+            parts.append(part)
+    table = pd.concat(parts, ignore_index=True)
+    totals = table.groupby(["siec", "nrg_bal"])["value"].sum()
+    out = {}
+    for fuel, code in _EUROSTAT.items():
+        out[fuel] = {
+            "production": float(totals.get((code, "PPRD"), 0.0)),
+            "imports": float(totals.get((code, "IMP"), 0.0)),
+            "exports": float(totals.get((code, "EXP"), 0.0)),
+        }
+    _PRODUCTION_2020 = out
+    return out
+
+
+def fossil_use_twh(scenario: str) -> dict[str, pd.Series]:
+    """Fossil gas and crude oil entering the system, in TWh."""
+    balance = common.read_csv(scenario, "energy_balance")
+    specs = {
+        "gas": ("gas", "gas"),
+        "oil": ("oil primary", "oil primary"),
+    }
+    out = {}
+    for fuel, (bus, carrier) in specs.items():
+        flows = balance.loc[
+            (balance["bus_carrier"] == bus) & (balance["carrier"] == carrier)
+        ]
+        values = {}
+        for year in common.HORIZONS:
+            column = str(year)
+            values[year] = float(flows[column].clip(lower=0).sum()) / 1e6
+        out[fuel] = pd.Series(values)
+    return out
+
+
+def fossil_self_sufficiency(scenario: str) -> dict[str, pd.Series]:
+    """Self-sufficiency against gas and oil produced in the study countries now.
+
+    2020 uses Eurostat: production / (production + imports - exports).
+    2030, 2040 and 2050 keep that 2020 production and divide it by fossil
+    use in the scenario. When production covers all of that use, the
+    value is 100%.
+    """
+    history = production_2020_twh()
+    use = fossil_use_twh(scenario)
+    series = {}
+    for fuel in ("gas", "oil"):
+        produced = history[fuel]["production"]
+        net_supply = produced + history[fuel]["imports"] - history[fuel]["exports"]
+        values = {2020: min(100.0, 100.0 * produced / net_supply)}
+        for year, consumed in use[fuel].items():
+            if consumed <= produced:
+                values[int(year)] = 100.0
+            else:
+                values[int(year)] = 100.0 * produced / consumed
+        series[fuel] = pd.Series(values)
+    return series
 
 
 def main() -> None:

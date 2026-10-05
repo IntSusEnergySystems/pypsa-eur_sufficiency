@@ -111,11 +111,11 @@ if __name__ == "__main__":
             n, n_previous, inputs, params, current_horizon, renewable_carriers
         )
 
-    # One extendable nuclear generator per country. Existing MW come from the
-    # horizon table; earlier myopic builds are added on top of that.
+    # One extendable nuclear generator per country. Existing MW are the
+    # powerplants.csv units whose DateOut is not before this horizon.
     apply_nuclear_capacity(
         n,
-        inputs.nuclear_capacity,
+        inputs.powerplants,
         current_horizon,
         n_previous=n_previous if foresight == "myopic" and not is_first_horizon else None,
     )

@@ -50,7 +50,7 @@ def main() -> None:
     # CO2 per capita maps, one row.
     co2 = {scenario: co2_per_capita(scenario) for scenario in common.SCENARIOS}
     stacked = pd.concat(co2.values())
-    values = stacked.abs().to_numpy()
+    values = stacked.to_numpy()
     limit = float(np.nanmax(values)) if np.isfinite(values).any() else 1.0
     if limit == 0:
         limit = 1.0
@@ -71,8 +71,8 @@ def main() -> None:
             frame.plot(
                 column="co2",
                 ax=ax,
-                cmap="RdBu_r",
-                vmin=-limit,
+                cmap="YlOrRd",
+                vmin=0,
                 vmax=limit,
                 linewidth=0.35,
                 edgecolor="0.3",
@@ -81,9 +81,9 @@ def main() -> None:
             ax.set_title(f"{common.LABELS[scenario]} {year}", fontsize=11)
     cax = map_fig.add_subplot(map_grid[:, -1])
     map_fig.colorbar(
-        plt.cm.ScalarMappable(cmap="RdBu_r", norm=plt.Normalize(vmin=-limit, vmax=limit)),
+        plt.cm.ScalarMappable(cmap="YlOrRd", norm=plt.Normalize(vmin=0, vmax=limit)),
         cax=cax,
-        label="Net CO2 [t/capita]",
+        label="CO2 [t/capita]",
     )
 
     price_fig, price_ax = plt.subplots(figsize=(8, 5))

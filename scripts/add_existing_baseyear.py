@@ -225,7 +225,7 @@ def add_power_capacities_installed_before_baseyear(
     if is_nuclear.any():
         logger.info(
             "Not adding %d nuclear plants as links; existing nuclear capacity "
-            "comes from data/nuclear_capacity.csv.",
+            "comes from powerplants.csv, excluding units already decommissioned.",
             int(is_nuclear.sum()),
         )
         df_agg = df_agg.loc[~is_nuclear].copy()

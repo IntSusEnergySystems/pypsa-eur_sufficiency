@@ -9,10 +9,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import geopandas as gpd
 import matplotlib.pyplot as plt
 import numpy as np
-from matplotlib.lines import Line2D
+from matplotlib.colors import BoundaryNorm
 
 import common
-from self_sufficiency import system_share
+from self_sufficiency import fossil_self_sufficiency
 
 VRE_COLORS = ["#f9d002", "#235ebc", "#6895dd"]
 VRE_LABELS = ["Solar", "Onshore wind", "Offshore wind"]
@@ -20,30 +20,17 @@ PRICE_COLORS = {"AC": "#110d63", "H2": "#bf13a0", "urban central heat": "#e8beac
 PRICE_NAMES = {"AC": "Electricity", "H2": "Hydrogen", "urban central heat": "District heating"}
 
 
-def capacity_factors(scenario: str) -> dict[str, list[float]]:
-    factors = common.read_csv(scenario, "capacity_factors")
-    nuclear_row = factors.loc[factors["carrier"] == "nuclear", [str(year) for year in common.HORIZONS]]
-    caps = common.read_csv(scenario, "capacities")
-    energy = common.read_csv(scenario, "energy_balance")
-    ccgt_cap = caps.loc[caps["carrier"] == "CCGT", [str(year) for year in common.HORIZONS]].sum()
-    ccgt_mwh = energy.loc[
-        (energy["carrier"] == "CCGT") & (energy["bus_carrier"] == "AC"),
-        [str(year) for year in common.HORIZONS],
-    ].sum()
-    ccgt = (ccgt_mwh / (ccgt_cap * 8760).replace(0, np.nan)).fillna(0.0)
-    nuclear = nuclear_row.sum() if not nuclear_row.empty else ccgt * 0.0
-    return {
-        "nuclear": [float(nuclear[str(year)]) for year in common.HORIZONS],
-        "CCGT": [float(ccgt[str(year)]) for year in common.HORIZONS],
-    }
-
-
 def main() -> None:
     regions = gpd.read_file(common.regions_path()).set_index("name")
     curtailment = common.system_curtailment_twh()
-    co2 = {scenario: common.co2_per_capita(scenario) for scenario in common.SCENARIOS}
-    finite = np.concatenate([frame.to_numpy().ravel() for frame in co2.values()])
-    limit = float(np.nanmax(np.abs(finite))) if np.isfinite(finite).any() else 1.0
+    co2 = {}
+    for scenario in common.SCENARIOS:
+        annual = common.co2_per_capita(scenario)
+        co2[scenario] = annual["2030"] * 5 + annual["2040"] * 10 + annual["2050"] * 10
+    co2_max = float(co2["ref"].max())
+    co2_bounds = [25, 40, 55, 70, 85, 100, 130, 180, co2_max]
+    co2_cmap = plt.colormaps["Reds"].resampled(len(co2_bounds) - 1)
+    co2_norm = BoundaryNorm(co2_bounds, co2_cmap.N, clip=True)
     prices = {scenario: common.read_csv(scenario, "prices").set_index("carrier") for scenario in common.SCENARIOS}
 
     price_values = []
@@ -55,105 +42,112 @@ def main() -> None:
     price_max = max(price_values) * 1.08
     price_min = min(0.0, min(price_values))
 
-    fig = plt.figure(figsize=(16, 18))
-    outer = fig.add_gridspec(5, 1, height_ratios=[1, 1.15, 1, 1.25, 1], hspace=0.42, left=0.10, right=0.94, top=0.97, bottom=0.03)
+    fig = plt.figure(figsize=(16, 23))
+    outer = fig.add_gridspec(4, 1, height_ratios=[1.7, 1.55, 1.95, 1.7], hspace=0.48, left=0.11, right=0.94, top=0.98, bottom=0.03)
     row_names = [
-        "(a) Gas self-sufficiency",
+        "(a) Gas and oil self-sufficiency",
         "(b) VRE curtailment",
-        "(c) Capacity factors",
-        "(d) Net CO2 per capita",
-        "(e) Wholesale prices",
+        "(c) Cumulative CO2 per capita",
+        "(d) Wholesale prices",
     ]
 
-    top = outer[0].subgridspec(1, 3, wspace=0.25)
-    ss_axes = []
-    for col, scenario in enumerate(common.SCENARIOS):
-        ax = fig.add_subplot(top[0, col], sharey=ss_axes[0] if ss_axes else None)
-        ss_axes.append(ax)
-        series = system_share(None, scenario)
-        ax.plot(series.index.astype(str), series.values, color=common.SCENARIO_COLORS[scenario], marker="o", linewidth=2)
-        ax.set_ylim(0, 105)
-        ax.set_title(common.LABELS[scenario], fontsize=16)
-        ax.tick_params(labelsize=13)
-        if col == 0:
-            ax.set_ylabel("Self-sufficiency [%]", fontsize=14)
-        ax.grid(True, linestyle="--", linewidth=0.4)
+    ax = fig.add_subplot(outer[0].subgridspec(1, 5, width_ratios=[0.4, 1, 1, 1, 0.4], wspace=0)[0, 1:4])
+    markers = {"ref": "o", "suff": "s", "suff-nocdr": "D"}
+    years = ["2020", "2030", "2040", "2050"]
+    for scenario in common.SCENARIOS:
+        shares = fossil_self_sufficiency(scenario)
+        ax.plot(
+            years,
+            [shares["gas"].get(int(year), np.nan) for year in years],
+            color=common.SCENARIO_COLORS[scenario],
+            marker=markers[scenario],
+            linestyle="-",
+            linewidth=1.15,
+            markersize=5,
+            label=f"{common.LABELS[scenario]} gas",
+        )
+        ax.plot(
+            years,
+            [shares["oil"].get(int(year), np.nan) for year in years],
+            color=common.SCENARIO_COLORS[scenario],
+            marker=markers[scenario],
+            linestyle="--",
+            linewidth=1.15,
+            markersize=5,
+            label=f"{common.LABELS[scenario]} oil",
+        )
+    ax.set_ylim(0, 105)
+    ax.set_ylabel("Self-sufficiency [%]", fontsize=17)
+    ax.tick_params(labelsize=16)
+    ax.grid(True, linestyle="--", linewidth=0.4)
+    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.18), ncol=6, frameon=False, fontsize=15)
 
-    pie_row = outer[1].subgridspec(1, 9, wspace=0.35)
-    for col, scenario in enumerate(common.SCENARIOS):
-        for i, year in enumerate(common.HORIZONS):
-            ax = fig.add_subplot(pie_row[0, col * 3 + i])
+    ax = fig.add_subplot(outer[1].subgridspec(1, 5, width_ratios=[0.4, 1, 1, 1, 0.4], wspace=0)[0, 1:4])
+    techs = list(common.VRE_GROUPS)
+    bar_width = 0.24
+    group = 1.15
+    tick_positions = []
+    tick_labels = []
+    year_positions = []
+    for yi, year in enumerate(common.HORIZONS):
+        group_positions = []
+        for si, scenario in enumerate(common.SCENARIOS):
+            pos = yi * group + (si - 1) * bar_width
+            group_positions.append(pos)
             part = curtailment[(curtailment["scenario"] == scenario) & (curtailment["year"] == year)]
-            values = [float(part.loc[part["tech"] == tech, "twh"].sum()) for tech in common.VRE_GROUPS]
-            total = sum(values)
-            ax.pie(
-                [value if value > 0 else 1e-9 for value in values],
-                colors=VRE_COLORS,
-                startangle=90,
-                wedgeprops={"width": 0.45},
-            )
-            ax.set_title(f"{year}\n{total:.0f} TWh", fontsize=12)
-    pie_handles = [
-        Line2D([0], [0], marker="o", color="w", markerfacecolor=color, markersize=8, label=label)
-        for color, label in zip(VRE_COLORS, VRE_LABELS)
-    ]
-    pie_position = outer[1].get_position(fig)
-    fig.legend(
-        handles=pie_handles,
-        loc="upper center",
-        bbox_to_anchor=(0.52, pie_position.y0 - 0.005),
-        ncol=3,
-        frameon=False,
-        fontsize=13,
-    )
+            bottom = 0.0
+            for tech, color, label in zip(techs, VRE_COLORS, VRE_LABELS):
+                height = float(part.loc[part["tech"] == tech, "twh"].sum())
+                ax.bar(
+                    pos,
+                    height,
+                    bar_width * 0.92,
+                    bottom=bottom,
+                    color=color,
+                    edgecolor="0.2",
+                    linewidth=0.3,
+                    label=label if yi == 0 and si == 0 else None,
+                )
+                bottom += height
+        tick_positions.extend(group_positions)
+        tick_labels.extend(common.LABELS[scenario] for scenario in common.SCENARIOS)
+        year_positions.append(sum(group_positions) / len(group_positions))
+    ax.set_xticks(tick_positions, tick_labels, fontsize=14)
+    ax.tick_params(axis="y", labelsize=16)
+    ax.set_ylabel("Curtailment [TWh]", fontsize=17)
+    ax.grid(True, axis="y", linestyle="--", linewidth=0.4)
+    for pos, year in zip(year_positions, common.HORIZONS):
+        ax.text(pos, 1.03, str(year), transform=ax.get_xaxis_transform(), ha="center", va="bottom", fontsize=16)
+    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.22), ncol=3, frameon=False, fontsize=15)
 
-    cf_row = outer[2].subgridspec(1, 3, wspace=0.25)
-    cf_axes = []
+    map_row = outer[2].subgridspec(2, 3, height_ratios=[1.4, 0.08], hspace=0.08, wspace=0.012)
     for col, scenario in enumerate(common.SCENARIOS):
-        ax = fig.add_subplot(cf_row[0, col], sharey=cf_axes[0] if cf_axes else None)
-        cf_axes.append(ax)
-        factors = capacity_factors(scenario)
-        x = np.arange(len(common.HORIZONS))
-        width = 0.35
-        ax.bar(x - width / 2, factors["nuclear"], width, color="#ff8c00", label="Nuclear")
-        ax.bar(x + width / 2, factors["CCGT"], width, color="#a85522", label="CCGT")
-        ax.set_xticks(x, [str(year) for year in common.HORIZONS])
-        ax.set_ylim(0, 1)
-        ax.tick_params(labelsize=13)
-        if col == 0:
-            ax.set_ylabel("Capacity factor", fontsize=14)
-        ax.grid(True, axis="y", linestyle="--", linewidth=0.4)
-        if col == 2:
-            ax.legend(fontsize=12)
-
-    map_row = outer[3].subgridspec(1, 10, width_ratios=[1] * 9 + [0.08], wspace=0.12)
-    for col, scenario in enumerate(common.SCENARIOS):
-        for i, year in enumerate(common.HORIZONS):
-            ax = fig.add_subplot(map_row[0, col * 3 + i])
-            frame = regions.join(co2[scenario][str(year)].rename("co2"), how="left")
-            frame.plot(
-                column="co2",
-                ax=ax,
-                cmap="RdBu_r",
-                vmin=-limit,
-                vmax=limit,
-                linewidth=0.35,
-                edgecolor="0.25",
-            )
-            ax.set_axis_off()
-            ax.set_title(str(year), fontsize=13)
-    cax = fig.add_subplot(map_row[0, -1])
-    fig.colorbar(
-        plt.cm.ScalarMappable(cmap="RdBu_r", norm=plt.Normalize(vmin=-limit, vmax=limit)),
+        ax = fig.add_subplot(map_row[0, col])
+        frame = regions.join(co2[scenario].rename("co2"), how="left")
+        frame.plot(
+            column="co2",
+            ax=ax,
+            cmap=co2_cmap,
+            norm=co2_norm,
+            linewidth=0.35,
+            edgecolor="0.25",
+            missing_kwds={"color": "0.85"},
+        )
+        ax.set_axis_off()
+        ax.set_title(common.LABELS[scenario], fontsize=18)
+    colorbar_row = map_row[1, :].subgridspec(1, 5, width_ratios=[1.1, 1, 1, 1, 1.1], wspace=0)
+    cax = fig.add_subplot(colorbar_row[0, 1:4])
+    colorbar = fig.colorbar(
+        plt.cm.ScalarMappable(cmap=co2_cmap, norm=co2_norm),
         cax=cax,
-        label="t/capita",
+        orientation="horizontal",
     )
+    colorbar.set_label("t/capita to 2050", fontsize=17)
+    colorbar.ax.tick_params(labelsize=15)
 
-    price_row = outer[4].subgridspec(1, 3, wspace=0.25)
-    price_axes = []
-    for col, scenario in enumerate(common.SCENARIOS):
-        ax = fig.add_subplot(price_row[0, col], sharey=price_axes[0] if price_axes else None)
-        price_axes.append(ax)
+    ax = fig.add_subplot(outer[3].subgridspec(1, 5, width_ratios=[0.4, 1, 1, 1, 0.4], wspace=0)[0, 1:4])
+    line_styles = {"ref": "-", "suff": "--", "suff-nocdr": ":"}
+    for scenario in common.SCENARIOS:
         for carrier, marker in zip(PRICE_COLORS, ["o", "s", "v"]):
             series = prices[scenario].loc[carrier, [str(year) for year in common.HORIZONS]].astype(float)
             ax.plot(
@@ -161,19 +155,29 @@ def main() -> None:
                 series.values,
                 color=PRICE_COLORS[carrier],
                 marker=marker,
-                label=PRICE_NAMES[carrier],
+                linestyle=line_styles[scenario],
+                linewidth=1.15,
+                markersize=5,
+                label=f"{common.LABELS[scenario]} {PRICE_NAMES[carrier].lower()}",
             )
-        ax.set_ylim(price_min, price_max)
-        ax.tick_params(labelsize=13)
-        if col == 0:
-            ax.set_ylabel("Price [EUR/MWh]", fontsize=14)
-        ax.grid(True, linestyle="--", linewidth=0.4)
-        if col == 2:
-            ax.legend(fontsize=12)
+    ax.set_ylim(price_min, price_max)
+    ax.set_ylabel("Price [EUR/MWh]", fontsize=17)
+    ax.tick_params(labelsize=16)
+    ax.grid(True, linestyle="--", linewidth=0.4)
+    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.20), ncol=3, frameon=False, fontsize=15)
 
     for name, slot in zip(row_names, outer):
         position = slot.get_position(fig)
-        fig.text(0.012, position.y0 + position.height / 2, name, rotation=90, va="center", ha="center", fontsize=14)
+        fig.text(
+            0.012,
+            position.y0 + position.height / 2,
+            name,
+            rotation=90,
+            va="center",
+            ha="center",
+            fontsize=18,
+            fontweight="bold",
+        )
 
     print(common.savefig(fig, "multi"))
 
