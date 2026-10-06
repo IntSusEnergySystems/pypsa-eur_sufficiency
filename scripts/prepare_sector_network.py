@@ -2639,53 +2639,91 @@ def build_heat_demand(
     return heat_demand
 
 
+def _load_names(n, *names):
+    return [name for name in names if name in n.loads.index]
+
+
+def _annual_heat_twh(n, names, weightings):
+    total = 0.0
+    for name in names:
+        if name in n.loads_t.p_set.columns:
+            total += float((n.loads_t.p_set[name] * weightings).sum())
+        else:
+            total += float(n.loads.at[name, "p_set"] * weightings.sum())
+    return total / 1e6
+
+
+def _scale_heat_loads(n, names, factor):
+    for name in names:
+        if name in n.loads_t.p_set.columns:
+            n.loads_t.p_set[name] *= factor
+        else:
+            n.loads.at[name, "p_set"] *= factor
+
+
 def write_sufficiency_heat_demands(n, pop_weighted_energy_totals, district_heat_share):
-    """Scale country heat loads so annual totals match CLEVER heat demands."""
+    """Scale country heat loads so annual totals match CLEVER heat demands.
+
+    Space heating, hot water and the rural / district-heat split come from the
+    CLEVER columns already stored on the population-weighted energy totals.
+    Agriculture heat is a separate load and is left unchanged.
+    """
     heat = pop_weighted_energy_totals.copy()
     if heat.index.nlevels == 1:
         heat["country"] = heat.index.str[:2]
         heat = heat.groupby("country").sum(numeric_only=True)
 
-    countries = district_heat_share.index
-    weights = n.snapshot_weightings.objective.mean()
-    for country in countries:
+    weightings = n.snapshot_weightings.objective
+    categories = {
+        "rural": (
+            "{country} rural heat",
+            "{country} residential rural heat",
+            "{country} services rural heat",
+        ),
+        "urban decentral": (
+            "{country} urban decentral heat",
+            "{country} residential urban decentral heat",
+            "{country} services urban decentral heat",
+        ),
+        "urban central": ("{country} urban central heat",),
+    }
+
+    for country in district_heat_share.index:
         if country not in heat.index:
             continue
         h = heat.loc[country]
-        urban_frac = district_heat_share.loc[country, "urban fraction"]
-        urban_central_frac_tot = h.get("distributed heat residential", 0) + h.get(
-            "distributed heat services", 0
-        )
         total_heat = (
             h.get("total residential space", 0)
             + h.get("total residential water", 0)
             + h.get("total services space", 0)
             + h.get("total services water", 0)
         )
-        if weights:
-            total_heat = total_heat / weights
-        urban_central_frac = urban_central_frac_tot / total_heat if total_heat else 0
-        rur_frac = 1 - urban_frac
-        urb_dec_frac = urban_frac - urban_central_frac
-        heat_categories = [
-            name
-            for name in (
-                f"{country} urban decentral heat",
-                f"{country} rural heat",
-                f"{country} urban central heat",
+        if not total_heat:
+            continue
+
+        urban_frac = float(district_heat_share.loc[country, "urban fraction"])
+        distributed = h.get("distributed heat residential", 0) + h.get(
+            "distributed heat services", 0
+        )
+        central_frac = min(max(distributed / total_heat, 0.0), urban_frac)
+        shares = {
+            "rural": 1.0 - urban_frac,
+            "urban decentral": urban_frac - central_frac,
+            "urban central": central_frac,
+        }
+
+        for category, templates in categories.items():
+            names = _load_names(
+                n, *(template.format(country=country) for template in templates)
             )
-            if name in n.loads_t.p_set.columns
-        ]
-        for heat_demand in heat_categories:
-            if "rural" in heat_demand:
-                target_heat = total_heat * rur_frac
-            elif "urban decentral" in heat_demand:
-                target_heat = total_heat * urb_dec_frac
-            else:
-                target_heat = total_heat * urban_central_frac
-            current = n.loads_t.p_set[heat_demand].sum() / 1e6
+            if not names:
+                continue
+            if shares[category] == 0:
+                _scale_heat_loads(n, names, 0.0)
+                continue
+            current = _annual_heat_twh(n, names, weightings)
             if current:
-                n.loads_t.p_set[heat_demand] *= target_heat / current
+                _scale_heat_loads(n, names, shares[category] * total_heat / current)
     return n
 
 
@@ -2810,8 +2848,9 @@ def add_heat(
 
     # NB: must add costs of central heating afterwards (EUR 400 / kWpeak, 50a, 1% FOM from Fraunhofer ISE)
 
-    # exogenously reduce space heat demand
-    if options["reduce_space_heat_exogenously"]:
+    # exogenously reduce space heat demand.
+    # Sufficiency scenarios keep the CLEVER annual totals instead.
+    if options["reduce_space_heat_exogenously"] and not _is_sufficiency():
         dE = get(options["reduce_space_heat_exogenously_factor"], investment_year)
         logger.info(f"Assumed space heat reduction of {dE:.2%}")
         for sector in sectors:

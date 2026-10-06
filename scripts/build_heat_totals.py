@@ -17,11 +17,18 @@ from itertools import product
 import pandas as pd
 from numpy.polynomial import Polynomial
 
-from scripts._helpers import configure_logging
+from scripts._helpers import configure_logging, is_sufficiency_run, set_scenario_config
 
 logger = logging.getLogger(__name__)
 
 idx = pd.IndexSlice
+
+# Annual totals copied from CLEVER. Electricity-for-heat stays on the
+# weather regression; sufficiency heat loads use these total columns.
+CLEVER_SPACE_HEAT_COLUMNS = (
+    "total residential space",
+    "total services space",
+)
 
 
 def approximate_heat_demand(
@@ -100,6 +107,45 @@ def approximate_heat_demand(
     return demands
 
 
+def apply_clever_space_heat(
+    heat_demand: pd.DataFrame,
+    energy_totals: pd.DataFrame,
+    year: int,
+    countries: list[str],
+) -> pd.DataFrame:
+    """Replace regressed space-heat totals with the CLEVER annual value.
+
+    CLEVER is stored on the energy-totals year. The same country total is
+    written onto every weather year so the snapshot year used later is the
+    CLEVER demand, not the historical heating-degree-day fit. Hot water and
+    agriculture heat are not in this table; they stay in the energy totals.
+    """
+    year_level = energy_totals.index.names[1] or 1
+    totals = energy_totals.xs(year, level=year_level)
+    countries_in_index = heat_demand.index.get_level_values(0)
+    selected = pd.Series(
+        countries_in_index.isin(list(countries)),
+        index=heat_demand.index,
+    )
+
+    for column in CLEVER_SPACE_HEAT_COLUMNS:
+        if column not in heat_demand.columns or column not in totals.columns:
+            continue
+        clever = pd.Series(
+            countries_in_index.map(totals[column]),
+            index=heat_demand.index,
+        )
+        mask = selected & clever.notna()
+        heat_demand.loc[mask, column] = clever.loc[mask]
+
+    logger.info(
+        "Using CLEVER space-heat totals from %s for %s countries",
+        year,
+        len(countries),
+    )
+    return heat_demand
+
+
 if __name__ == "__main__":
     if "snakemake" not in globals():
         from scripts._helpers import mock_snakemake
@@ -107,6 +153,7 @@ if __name__ == "__main__":
         snakemake = mock_snakemake("build_heat_totals")
 
     configure_logging(snakemake)
+    set_scenario_config(snakemake)
 
     hdd = pd.read_csv(snakemake.input.hdd, index_col=0, parse_dates=True)
     hdd = hdd.groupby(hdd.index.year).sum().div(1e3)
@@ -114,5 +161,13 @@ if __name__ == "__main__":
     energy_totals = pd.read_csv(snakemake.input.energy_totals, index_col=[0, 1])
 
     heat_demand = approximate_heat_demand(energy_totals, hdd)
+
+    if is_sufficiency_run(snakemake.config):
+        heat_demand = apply_clever_space_heat(
+            heat_demand,
+            energy_totals,
+            year=int(snakemake.config["energy"]["energy_totals_year"]),
+            countries=list(snakemake.config["countries"]),
+        )
 
     heat_demand.to_csv(snakemake.output.heat_totals)
