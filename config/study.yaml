@@ -3,7 +3,7 @@
 # Single workflow for this fork.
 # ref: reference demands, sequestration and CCS allowed.
 # suff: CLEVER demands, same technology options as ref (including CCS and DAC).
-# suff-nocdr: CLEVER demands, no sequestration, DAC or BECCS (CCU only).
+# suff-nocdr: CLEVER demands, no sequestration, DAC, BECCS or CO2 network (CCU only).
 # Loaded by the Snakefile on top of config/config.default.yaml.
 # config/config.yaml, if present, is applied afterwards.
 

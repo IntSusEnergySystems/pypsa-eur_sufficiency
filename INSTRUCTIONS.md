@@ -42,8 +42,9 @@ so each country is one node:
 - `ref` — reference demands. Sequestration, DAC and CCS are allowed.
 - `suff` — CLEVER demands, with the same technology options as `ref`,
   including sequestration, DAC and CCS.
-- `suff-nocdr` — CLEVER demands, but sequestration, DAC and BECCS are
-  switched off. Carbon capture remains only where the CO2 is used (CCU).
+- `suff-nocdr` — CLEVER demands, but sequestration, DAC, BECCS and the
+  CO2 network are switched off. Carbon capture remains only where the CO2
+  is used inside the country (CCU).
 
 Scenario names are listed in `config/study_scenarios.yaml`. A gitignored
 `config/config.yaml` can still override the study. A `--configfile` whose
