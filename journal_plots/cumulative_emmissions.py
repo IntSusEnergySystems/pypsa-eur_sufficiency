@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Cumulative CO2 by sector for ref, suff and suff-nocdr.
 
-Annual flows come from the atmospheric ``co2`` bus. The area chart is the
-running sum of annual emissions from 2020 through 2050.
+Annual flows come from the atmospheric ``co2`` bus. The cumulative total
+is the 2020 UNFCCC inventory plus ten years of each solved snapshot.
 """
 
 import sys
@@ -162,35 +162,30 @@ def annual_gt(scenario: str) -> pd.DataFrame:
 
 
 def cumulative_gt(annual: pd.DataFrame, scenario: str) -> pd.DataFrame:
-    """Cumulative CO2 from 2020, interpolating the solved years.
+    """Cumulative CO2 at 2020, 2030, 2040 and 2050.
 
-    2020 is the historical inventory. Later years are the solved energy
-    balance. The path between snapshots is linear, and each calendar year
-    is added once.
+    2020 is the UNFCCC inventory, counted once. Each solved year stands
+    for ten years, so 2050 is 2020 + 10×2030 + 10×2040 + 10×2050.
     """
-    frame = annual.copy()
-    frame.loc[2020] = historic_2020_gt(scenario)
-    frame = frame.sort_index()
-    yearly = frame.reindex(range(2020, 2051)).interpolate(method="index")
-    return yearly.cumsum()
+    weighted = annual.reindex([2030, 2040, 2050]) * 10
+    weighted.loc[2020] = historic_2020_gt(scenario)
+    return weighted.sort_index().cumsum()
 
 
 def _cumulative_gt(values: pd.Series) -> float:
-    """Sum an interpolated 2021–2050 flow. ``values`` is tonnes in solved years."""
-    annual = pd.Series(float("nan"), index=range(2020, 2051))
-    annual.loc[2020] = 0.0
+    """Ten years of each solved snapshot. ``values`` is tonnes in those years."""
+    total = 0.0
     for year in common.HORIZONS:
-        annual.loc[year] = float(values.get(str(year), 0.0))
-    annual = annual.interpolate(method="index")
-    return float(annual.loc[2021:2050].sum()) / 1e9
+        total += 10.0 * float(values.get(str(year), 0.0))
+    return total / 1e9
 
 
 def carbon_split_gt(scenario: str) -> dict[str, float]:
     """Cumulative capture and its fate, in Gt, from 2021 to 2050.
 
-    CC is capture other than DAC. CC (DAC) is direct air capture. CCU is
-    CO2 withdrawn from the stored-CO2 bus for use. Sequestration is CO2
-    sent to the sequestered bus.
+    Each solved year is counted for ten years. CC is capture other than
+    DAC. CC (DAC) is direct air capture. CCU is CO2 withdrawn from the
+    stored-CO2 bus for use. Sequestration is CO2 sent to the sequestered bus.
     """
     balance = common.read_csv(scenario, "energy_balance")
     stored = balance.loc[balance["bus_carrier"] == "co2 stored"]

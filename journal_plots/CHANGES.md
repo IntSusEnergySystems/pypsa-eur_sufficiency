@@ -85,7 +85,8 @@ these networks are 6 hours, so curtailed energy is
   keeps that figure and adds a pie for each scenario. One half of the
   pie is capture, split into CC and CC (DAC). The other half is its
   fate, split into CCU and sequestration. Pie area follows CO2 use
-  (CCU plus sequestration). Amounts are Gt from 2021 to 2050.
+  (CCU plus sequestration). The cumulative total is the 2020 UNFCCC
+  inventory plus ten years of 2030, of 2040 and of 2050.
 - `self_sufficiency.py` no longer reads `ChartData_EU.xlsx`. Gas
   self-sufficiency is domestic renewable gas divided by total gas supply.
 - `pie_charts.py` no longer reads `total_imports_BE.csv` or
