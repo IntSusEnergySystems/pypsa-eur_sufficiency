@@ -12,6 +12,19 @@ from pathlib import Path
 import matplotlib
 
 matplotlib.use("Agg")
+# Journal export: editable TrueType text in vector files, print resolution
+# for any raster layer.
+matplotlib.rcParams.update(
+    {
+        "pdf.fonttype": 42,
+        "ps.fonttype": 42,
+        "svg.fonttype": "none",
+        "savefig.dpi": 600,
+        "savefig.facecolor": "white",
+        "figure.facecolor": "white",
+        "axes.facecolor": "white",
+    }
+)
 
 import matplotlib.pyplot as plt
 import pandas as pd
@@ -138,10 +151,30 @@ def population() -> pd.Series:
 
 
 def savefig(fig: plt.Figure, name: str) -> Path:
+    """Write a print PNG and a vector PDF.
+
+    PNG is 600 dpi, which meets colour-figure requirements for journal
+    submission. The PDF keeps lines, text and patches as vectors, with
+    TrueType fonts so the file can be edited in production. Raster pieces
+    such as map colour fills are embedded at the same 600 dpi.
+    """
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     png = OUTPUT_DIR / f"{name}.png"
-    fig.savefig(png, dpi=150, bbox_inches="tight")
-    fig.savefig(OUTPUT_DIR / f"{name}.pdf", bbox_inches="tight")
+    pdf = OUTPUT_DIR / f"{name}.pdf"
+    fig.savefig(
+        png,
+        dpi=600,
+        bbox_inches="tight",
+        facecolor="white",
+        pad_inches=0.05,
+    )
+    fig.savefig(
+        pdf,
+        dpi=600,
+        bbox_inches="tight",
+        facecolor="white",
+        pad_inches=0.05,
+    )
     plt.close(fig)
     return png
 

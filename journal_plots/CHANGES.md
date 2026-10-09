@@ -20,7 +20,8 @@ network time series.
 `common.py` holds scenario names, colours, GDP figures, CSV and network
 paths, population, and the VRE curtailment helper. Snapshot weights in
 these networks are 6 hours, so curtailed energy is
-`(p_max_pu * p_nom_opt - p) * 6`.
+`(p_max_pu * p_nom_opt - p) * 6`. Every figure is written as a 600 dpi
+PNG and a vector PDF with embedded TrueType fonts.
 
 ## Script fixes
 
