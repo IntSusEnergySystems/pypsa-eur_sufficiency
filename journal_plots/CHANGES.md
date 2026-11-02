@@ -13,15 +13,17 @@ DAC or BECCS).
 
 Figures are written to `journal_plots/output/`. Country curtailment is
 cached in `journal_plots/.cache/` because it is summed from the solved
-network time series.
+network time series. All figures were redrawn from the October 2026
+solves.
 
 ## Shared loader
 
 `common.py` holds scenario names, colours, GDP figures, CSV and network
 paths, population, and the VRE curtailment helper. Snapshot weights in
 these networks are 6 hours, so curtailed energy is
-`(p_max_pu * p_nom_opt - p) * 6`. Every figure is written as a 600 dpi
-PNG and a vector PDF with embedded TrueType fonts.
+`(p_max_pu * p_nom_opt - p) * 6`. Every figure is written as a 300 dpi
+RGB PNG with a white background, and as a vector PDF with embedded
+TrueType fonts. The PNG stays small enough for an image viewer to open.
 
 ## Script fixes
 
@@ -36,6 +38,10 @@ PNG and a vector PDF with embedded TrueType fonts.
   Mt/year, from the `co2 stored` bus, and its axis label is carbon
   management capacities. Each y-axis extends 25% above its previous
   maximum, with even gaps between the ticks. Technology legends are larger.
+  The storage panel is in TWh. Home battery is replaced by thermal energy
+  storage: rural, urban decentral and urban central water tanks, plus urban
+  central water pits. Chargers and dischargers stay out, because those are
+  power ratings.
 - Biogas upgrading with capture is omitted from the capacity figure.
   BECCS remains the solid-biomass capture group, which is zero in
   `suff-nocdr`.
@@ -76,16 +82,19 @@ PNG and a vector PDF with embedded TrueType fonts.
   `BioSNG CC`, biomass CHP CC, industry biomass CC), which is zero in
   `suff-nocdr`.
 - `investment_costs.py` reads capital costs from `costs.csv`. The left
-  panel is the 2025–2050 total: the 2030 investment cost for 5 years
-  and the 2040 and 2050 costs for 10 years each. Dotted lines separate
+  panel is the cumulative total with each solved year counted for ten
+  years: 10×2030 + 10×2040 + 10×2050. Dotted lines separate
   the years on the annual chart. Technology colours no longer look up a missing
   `Fossil Fuels` key. `suff-nocdr` is a third bar in each year.
 - `cumulative_emmissions.py` no longer needs `SEPIA/SEPIA_config.xlsx`.
   Annual CO2 is the `co2` bus of `energy_balance.csv`, in Gt, for all
   three scenarios. Removals stay negative. `cumulative_emissions_ccs`
   keeps that figure and adds a pie for each scenario. One half of the
-  pie is capture, split into CC and CC (DAC). The other half is its
-  fate, split into CCU and sequestration. Pie area follows CO2 use
+  pie is capture, split into CC, CC (BECCS) and CC (DAC). The other half is its
+  fate, split into CCU and sequestration. BECCS is its own area and bar,
+  separate from biomass without capture. Pie labels sit outside the wedges
+  so the small Suff slices stay apart. Areas, bars, pies and the legend are
+  drawn at 75% opacity. Pie area follows CO2 use
   (CCU plus sequestration). The cumulative total is the 2020 UNFCCC
   inventory plus ten years of 2030, of 2040 and of 2050.
 - `self_sufficiency.py` no longer reads `ChartData_EU.xlsx`. Gas
@@ -105,9 +114,12 @@ PNG and a vector PDF with embedded TrueType fonts.
   on the atmospheric CO2 bus, because `nodal_energy_balance.csv` books
   that bus at `EU`, together with `pop_layout.csv`. Only CO2 added to
   the atmosphere is counted. DAC, biomass capture and sequestration are
-  left out. In `multi.py`, gas and oil self-sufficiency share one chart,
-  cumulative CO2 to 2050 is one map per scenario, and wholesale prices
-  for all three scenarios share one chart. Each panel includes
+  left out. `multi.py` has five panels. (a) is the carbon price, the negated
+  `co2_shadow` from `metrics.csv`, drawn as grouped bars for Ref, Suff and
+  suff-nocdr. (b) is the self-sufficiency level, with gas and oil on one
+  chart. (c) is VRE curtailment. (d) is cumulative CO2 to 2050, one map
+  per scenario. (e) is Marginal Prices for electricity, hydrogen
+  and district heating. Each panel includes
   `suff-nocdr`. Gas and oil self-sufficiency is 2020 production in the
   study countries divided by fossil use. The 2020 point is Eurostat
   natural gas (`G3000`) and crude oil (`O4100_TOT`): production divided
@@ -115,34 +127,37 @@ PNG and a vector PDF with embedded TrueType fonts.
   region cancels. Later years keep that 2020 production and use fossil
   gas and crude oil from the energy balance. The share stops at 100%
   when that production covers all fossil use. Switzerland is absent
-  from the Eurostat file. Line charts are narrower and use a thinner
-  stroke. Curtailment is one stacked bar chart for every scenario and
-  year. Cumulative CO2
+  from the Eurostat file. Line charts use a slightly heavier stroke.
+  District heating in the wholesale-price panel is burnt orange.
+  Axis labels, ticks, legends and panel titles are larger, the lines are
+  heavier, the curtailment scenario names are angled, and the curtailment
+  legend sits inside the panel on the left. The row titles sit closer to
+  the panels.
+  Curtailment is one stacked bar chart for every scenario and
+  year, redrawn from the October solved networks. Cumulative CO2
   per capita uses a stepped `Reds` scale. The top of the colour bar is
   the highest value in Ref. The bar sits under the maps. Line and bar
   panels are taller than the earlier equal-height layout. Axis labels,
   ticks and legends use a larger type size. The left-hand panel titles
   are bold.
 - `map.py` is one row of three maps in the Equal Earth projection
-  (EPSG:8857), for Ref, Suff and suff-nocdr. Pies are cumulative
-  2025–2050 system cost, capital and operating (2030 weighted by 5 years,
-  2040 and 2050 by 10), with the 2050 HVAC and HVDC grid. Transmission
+  (EPSG:8857), for Ref, Suff and suff-nocdr. Pies are cumulative investment, capital cost only, with each solved
+  year counted for ten years (10×2030 + 10×2040 + 10×2050), and the 2050 HVAC and HVDC grid. Transmission
   lines and hydrogen, CO2 and gas pipelines that join two countries are
   split equally between those countries. Panel titles sit under the maps as
   (a) Ref, (b) Suff and (c) Suff-nocdr. The technology legend is two rows.
   Pie size and line width each use one
   scale. The cost-size legend sits on the upper left of Suff, and the
   transmission-capacity legend sits between Suff and Suff-nocdr. Tick labels,
-  axis labels and legends use a larger type size. Country shading is annual spending as a share of GDP per year:
-  that cumulative cost plus imports and minus exports. The marginal cost
-  of CO2 is left out, including cross-border CO2 valued at the CO2 bus
-  price. Other cross-border flows are valued snapshot by snapshot at the
-  marginal price of the importing node, and that same amount is the
-  exporter's revenue. The colour bar uses the OrRd scale.
+  axis labels and legends use a larger type size. Country shading is annual investment as a share of GDP per year:
+  that cumulative capital cost divided by 30. Operating costs and trade are left out. The colour bar uses the same OrRd range as the country shading, from 0 to the highest share on the maps.
 - `Efficiency vs Sufficiency/curtailment.py` no longer points at
   `/home/umair/pypsa-eur_master`. Country maps cover the three scenarios
   and the three planning years.
 - `Efficiency vs Sufficiency/piebars.py` no longer reads SEPIA
   `inputsEU.xlsx`. Delivered energy by sector comes from the energy
   balance. `suff` and `suff-nocdr` use the same CLEVER demands, so those
-  bars match.
+  bars match. Transport omits agriculture machinery oil. Industry includes
+  hydrogen (`H2 for industry`). Urban central heat is labelled district
+  heating and drawn in orange (`#d95f0e`). Urban decentral heat and rural
+  heat are summed as decentral heat.

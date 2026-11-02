@@ -28,6 +28,7 @@ matplotlib.rcParams.update(
 
 import matplotlib.pyplot as plt
 import pandas as pd
+from PIL import Image
 import xarray as xr
 import yaml
 
@@ -102,6 +103,7 @@ def tech_colors() -> dict:
             "Transmission lines": "green",
             "Grid-scale battery": "lightgreen",
             "home battery": "blue",
+            "thermal energy storage": "#f3afa3",
             "H2 pipeline": "slateblue",
             "gas pipeline": "grey",
             "BECCS": "#889717",
@@ -151,21 +153,25 @@ def population() -> pd.Series:
 
 
 def savefig(fig: plt.Figure, name: str) -> Path:
-    """Write a print PNG and a vector PDF.
+    """Write a PNG for viewing and a vector PDF for submission.
 
-    PNG is 600 dpi, which meets colour-figure requirements for journal
-    submission. The PDF keeps lines, text and patches as vectors, with
-    TrueType fonts so the file can be edited in production. Raster pieces
-    such as map colour fills are embedded at the same 600 dpi.
+    The PNG is 300 dpi RGB with a solid white background, so image viewers
+    can open it. A 600 dpi file of these large figures is too big for many
+    viewers, which then draw grey and white tiles. The PDF keeps lines,
+    text and patches as vectors, with TrueType fonts. Raster pieces such
+    as map colour fills are embedded at 600 dpi.
     """
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     png = OUTPUT_DIR / f"{name}.png"
     pdf = OUTPUT_DIR / f"{name}.pdf"
+    fig.patch.set_facecolor("white")
+    fig.patch.set_alpha(1)
     fig.savefig(
         png,
-        dpi=600,
+        dpi=300,
         bbox_inches="tight",
         facecolor="white",
+        transparent=False,
         pad_inches=0.05,
     )
     fig.savefig(
@@ -173,9 +179,14 @@ def savefig(fig: plt.Figure, name: str) -> Path:
         dpi=600,
         bbox_inches="tight",
         facecolor="white",
+        transparent=False,
         pad_inches=0.05,
     )
     plt.close(fig)
+    with Image.open(png) as image:
+        rgb = image.convert("RGB")
+        dpi = image.info.get("dpi", (300, 300))
+        rgb.save(png, dpi=dpi)
     return png
 
 

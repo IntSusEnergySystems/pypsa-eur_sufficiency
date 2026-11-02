@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Cost pies and transmission lines.
 
-One map for each scenario, in a single row. Each panel is the cumulative
-2025–2050 system cost, capital and operating (2030 for 5 years, 2040 and
-2050 for 10 years each), with the 2050 transmission grid. A transmission
+One map for each scenario, in a single row. Each panel is cumulative
+investment, capital cost only (10×2030 + 10×2040 + 10×2050), and the
+2050 transmission grid. A transmission
 line or a hydrogen, CO2 or gas pipeline between two countries is split
 equally between them. Pie and line legends use one scale for every map.
 """
@@ -170,30 +170,26 @@ def _split_branch_costs(network: pypsa.Network, year_costs: pd.Series) -> pd.Ser
 
 
 def scenario_costs(scenario: str) -> tuple:
-    """Cumulative cost, trade bill, and the 2050 network.
+    """Cumulative investment and the 2050 network.
 
-    Cost is capital plus operating expenditure. Transmission lines and
-    hydrogen, CO2 and gas pipelines are taken off the nodal table and
-    rebuilt from the solved networks so a cross-border branch is shared.
+    Only capital cost is kept. Transmission lines and hydrogen, CO2 and
+    gas pipelines are shared equally between the two countries.
     """
     costs = common.read_csv(scenario, "nodal_costs")
-    co2_marginal = costs["cost"].eq("marginal") & costs["carrier"].isin(CO2_MARGINAL_CARRIERS)
-    costs = costs.loc[~co2_marginal]
+    costs = costs.loc[costs["cost"].eq("capital")]
     shared = costs.loc[costs["carrier"].isin(CROSS_BORDER_CARRIERS) & (costs["location"] != "EU")]
     local = costs.loc[~costs["carrier"].isin(CROSS_BORDER_CARRIERS) & (costs["location"] != "EU")].copy()
     local["tech"] = local["carrier"].map(group_carrier)
     by_year = local.groupby(["location", "tech"])[["2030", "2040", "2050"]].sum()
-    total = by_year["2030"] * 5 + by_year["2040"] * 10 + by_year["2050"] * 10
-    trade = pd.Series(dtype=float)
+    total = by_year["2030"] * 10 + by_year["2040"] * 10 + by_year["2050"] * 10
     network_2050 = None
-    for year, weight in ((2030, 5), (2040, 10), (2050, 10)):
+    for year, weight in ((2030, 10), (2040, 10), (2050, 10)):
         network = pypsa.Network(common.network_path(scenario, year))
         year_costs = shared.groupby(["location", "carrier"])[str(year)].sum()
         total = total.add(_split_branch_costs(network, year_costs) * weight, fill_value=0.0)
-        trade = trade.add(trade_balance(network) * weight, fill_value=0.0)
         if year == 2050:
             network_2050 = network
-    return total, trade, network_2050
+    return total, network_2050
 
 
 def _branch_mw(network: pypsa.Network, line_column: str, link_column: str) -> tuple[pd.Series, pd.Series]:
@@ -258,12 +254,9 @@ def trade_balance(network: pypsa.Network) -> pd.Series:
 
 
 def gdp_share(costs: pd.Series, years: float, trade: pd.Series = None) -> pd.Series:
-    """Annual spending as a percentage of national GDP per year.
+    """Annual investment as a percentage of national GDP per year.
 
-    Spending is cumulative capital and operating cost, plus import costs
-    minus export revenue, divided by the number of years. The marginal
-    cost of CO2, and cross-border CO2 priced at the CO2 bus, are left out.
-    Other flows use the receiving node's marginal price in that snapshot.
+    Investment is cumulative capital cost divided by the number of years.
     """
     annual = costs.groupby(level=0).sum()
     if trade is not None:
@@ -318,10 +311,10 @@ def main() -> None:
     regions = gpd.read_file(common.regions_path("ref")).set_index("name").to_crs(PROJECTED)
     panels = []
     for scenario in common.SCENARIOS:
-        costs, trade, network = scenario_costs(scenario)
+        costs, network = scenario_costs(scenario)
         network = project_network(network)
         pies = _pie_series(costs, _ac_bus(network))
-        panels.append((common.LABELS[scenario], network, pies, gdp_share(costs, 25, trade), "s_nom_opt", "p_nom_opt"))
+        panels.append((common.LABELS[scenario], network, pies, gdp_share(costs, 30), "s_nom_opt", "p_nom_opt"))
 
     pie_peak = max(float(pies.groupby(level=0).sum().max()) for _, _, pies, _, _, _ in panels)
     line_peaks = []
@@ -370,7 +363,7 @@ def main() -> None:
         columnspacing=1.4,
     )
     pie_areas = [billion * 1e9 / pie_peak * PIE_RADIUS**2 for billion in PIE_LEGEND_BEUR]
-    add_legend_circles(
+ add_legend_circles(
         axes[1],
         pie_areas,
         [f"{billion:g} bEUR" for billion in PIE_LEGEND_BEUR],
@@ -379,7 +372,7 @@ def main() -> None:
             "loc": "upper left",
             "bbox_to_anchor": (0.0, 1.0),
             "frameon": False,
-            "title": "Cumulative cost",
+            "title": "Cumulative investment",
             "labelspacing": 3.2,
             "handletextpad": 1.0,
             "handlelength": 4.5,
@@ -389,7 +382,7 @@ def main() -> None:
         },
     )
     line_widths = [gigawatt * 1e3 / line_peak * MAX_LINEWIDTH for gigawatt in LINE_LEGEND_GW]
-    add_legend_lines(
+ add_legend_lines(
         axes[2],
         line_widths,
         [f"{gigawatt:g} GW" for gigawatt in LINE_LEGEND_GW],
@@ -408,11 +401,11 @@ def main() -> None:
         },
     )
     colorbar = fig.colorbar(
-        plt.cm.ScalarMappable(cmap="OrRd", norm=plt.Normalize(vmin=vmin, vmax=10)),
+        plt.cm.ScalarMappable(cmap="OrRd", norm=plt.Normalize(vmin=vmin, vmax=vmax)),
         cax=cax,
     )
     colorbar.ax.tick_params(labelsize=18)
-    colorbar.set_label("Spending [% of GDP per year]", fontsize=19)
+    colorbar.set_label("Investment [% of GDP per year]", fontsize=19)
     print(common.savefig(fig, "investment_map"))
 
 

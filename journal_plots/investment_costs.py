@@ -160,10 +160,10 @@ def main() -> None:
     totals = {}
     for scenario in common.SCENARIOS:
         table = capital_by_tech(scenario)
-        # Annualised capital cost held over 2025–2050 (25 years). 2030 covers
-        # the five years from 2025; 2040 and 2050 each cover the following decade.
+        # Each solved year stands for ten years, so the cumulative total is
+        # 10×2030 + 10×2040 + 10×2050.
         by_year = table.set_index("tech")[["2030", "2040", "2050"]].sum()
-        period = by_year["2030"] * 5 + by_year["2040"] * 10 + by_year["2050"] * 10
+        period = by_year["2030"] * 10 + by_year["2040"] * 10 + by_year["2050"] * 10
         totals[common.LABELS[scenario]] = float(period)
         wide = table.melt(id_vars="tech", var_name="year", value_name="eur")
         wide["column"] = wide["year"] + "\n" + common.LABELS[scenario]

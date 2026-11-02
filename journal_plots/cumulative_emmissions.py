@@ -5,6 +5,7 @@ Annual flows come from the atmospheric ``co2`` bus. The cumulative total
 is the 2020 UNFCCC inventory plus ten years of each solved snapshot.
 """
 
+import math
 import sys
 from pathlib import Path
 
@@ -52,11 +53,14 @@ SECTORS = {
     "Biogas": ["biogas to gas", "biogas to gas CC"],
     "Biomass": [
         "biomass to liquid",
-        "biomass to liquid CC",
         "BioSNG",
-        "BioSNG CC",
         "solid biomass for industry",
+    ],
+    "BECCS": [
+        "biomass to liquid CC",
+        "BioSNG CC",
         "solid biomass for industry CC",
+        "urban central solid biomass CHP CC",
     ],
     "DACCS": ["DAC"],
     "Land use and forestry": [],
@@ -72,6 +76,7 @@ COLORS = {
     "Industry": "#feda47",
     "Biogas": "#8a9a4a",
     "Biomass": "green",
+    "BECCS": "#889717",
     "DACCS": "#b1d1fc",
     "Land use and forestry": "#befdb7",
 }
@@ -82,7 +87,7 @@ AREA_TITLES = {
     "suff": "(b) Suff",
     "suff-nocdr": "(c) Suff-nocdr",
 }
-OPACITY = 0.5
+OPACITY = 0.75
 
 
 def half_yticks(ax) -> None:
@@ -136,6 +141,7 @@ def historic_2020_gt(scenario: str) -> pd.Series:
         "Industry": kt(7) + kt(8) + kt(9) + kt(30) + kt(32) + kt(42),
         "Biogas": 0.0,
         "Biomass": 0.0,
+        "BECCS": 0.0,
         "DACCS": 0.0,
         "Land use and forestry": 0.0,
     }
@@ -184,8 +190,9 @@ def carbon_split_gt(scenario: str) -> dict[str, float]:
     """Cumulative capture and its fate, in Gt, from 2021 to 2050.
 
     Each solved year is counted for ten years. CC is capture other than
-    DAC. CC (DAC) is direct air capture. CCU is CO2 withdrawn from the
-    stored-CO2 bus for use. Sequestration is CO2 sent to the sequestered bus.
+    DAC and BECCS. CC (BECCS) is capture on solid biomass. CC (DAC) is
+    direct air capture. CCU is CO2 withdrawn from the stored-CO2 bus for
+    use. Sequestration is CO2 sent to the sequestered bus.
     """
     balance = common.read_csv(scenario, "energy_balance")
     stored = balance.loc[balance["bus_carrier"] == "co2 stored"]
@@ -198,11 +205,19 @@ def carbon_split_gt(scenario: str) -> dict[str, float]:
             return 0.0
         return _cumulative_gt(frame.sum())
 
+    beccs_carriers = SECTORS["BECCS"]
     dac = flow(captured.loc[["DAC"]]) if "DAC" in captured.index else 0.0
-    cc = flow(captured.drop(index="DAC", errors="ignore"))
+    beccs = flow(captured.loc[captured.index.intersection(beccs_carriers)])
+    cc = flow(captured.drop(index=["DAC", *beccs_carriers], errors="ignore"))
     sequestration = flow(sinks.loc[["co2 sequestered"]]) if "co2 sequestered" in sinks.index else 0.0
     ccu = flow(sinks.drop(index="co2 sequestered", errors="ignore"))
-    return {"CC": cc, "CC (DAC)": dac, "CCU": ccu, "Sequestration": sequestration}
+    return {
+        "CC": cc,
+        "CC (BECCS)": beccs,
+        "CC (DAC)": dac,
+        "CCU": ccu,
+        "Sequestration": sequestration,
+    }
 
 
 def _half_slices(parts: list[tuple[str, float, str]]) -> list[tuple[str, float, str, float]]:
@@ -215,6 +230,53 @@ def _half_slices(parts: list[tuple[str, float, str]]) -> list[tuple[str, float, 
         for name, amount, color in parts
         if amount > 1e-6
     ]
+
+
+def _place_pie_labels(ax, wedges, labels: list[str], radius: float) -> None:
+    """Put pie labels outside the wedges and separate ones that would overlap."""
+    placed = []
+    for wedge, label in zip(wedges, labels):
+        angle = math.radians((wedge.theta1 + wedge.theta2) / 2.0)
+        placed.append(
+            {
+                "x": math.cos(angle),
+                "y": math.sin(angle),
+                "label": label,
+                "side": 1 if math.cos(angle) >= 0 else -1,
+            }
+        )
+    gap = 0.42
+    for side in (1, -1):
+        group = [item for item in placed if item["side"] == side]
+        group.sort(key=lambda item: item["y"])
+        heights = [item["y"] * radius for item in group]
+        for index in range(1, len(heights)):
+            if heights[index] - heights[index - 1] < gap:
+                heights[index] = heights[index - 1] + gap
+        if not heights:
+            continue
+        top = radius + 0.55
+        if heights[-1] > top:
+            shift = heights[-1] - top
+            heights = [height - shift for height in heights]
+        bottom = -(radius + 0.55)
+        if heights[0] < bottom:
+            shift = bottom - heights[0]
+            heights = [height + shift for height in heights]
+        for item, height in zip(group, heights):
+            item["ty"] = height
+            item["tx"] = side * (radius + 0.18)
+    for item in placed:
+        ax.annotate(
+            item["label"],
+            xy=(item["x"] * radius * 0.98, item["y"] * radius * 0.98),
+            xytext=(item["tx"], item["ty"]),
+            ha="left" if item["side"] > 0 else "right",
+            va="center",
+            fontsize=14,
+            annotation_clip=False,
+            arrowprops={"arrowstyle": "-", "color": "0.35", "lw": 0.8, "shrinkA": 0, "shrinkB": 4},
+        )
 
 
 def draw(series: dict[str, pd.DataFrame], with_pies: bool) -> plt.Figure:
@@ -302,21 +364,31 @@ def draw(series: dict[str, pd.DataFrame], with_pies: bool) -> plt.Figure:
 
         if with_pies:
             split = splits[scenario]
-            capture = [("CC", split["CC"], "#e31a1c"), ("CC (DAC)", split["CC (DAC)"], "#b1d1fc")]
+            capture = [
+                ("CC", split["CC"], "#e31a1c"),
+                ("CC (BECCS)", split["CC (BECCS)"], COLORS["BECCS"]),
+                ("CC (DAC)", split["CC (DAC)"], "#b1d1fc"),
+            ]
             fate = [("CCU", split["CCU"], "#fc9272"), ("Sequestration", split["Sequestration"], "#7f0000")]
             wedges = _half_slices(capture) + _half_slices(fate)
             radius = (uses[scenario] / peak_use) ** 0.5 if peak_use else 1.0
-            axes[row, 2].pie(
+            pie_wedges, _ = axes[row, 2].pie(
                 [item[1] for item in wedges],
-                labels=[f"{name}\n{amount:.1f} Gt" for name, _weight, _color, amount in wedges],
                 colors=[item[2] for item in wedges],
                 startangle=90,
                 counterclock=False,
                 radius=radius,
                 wedgeprops={"edgecolor": "white", "linewidth": 1.2, "alpha": OPACITY},
-                textprops={"fontsize": 16},
             )
-            
+            _place_pie_labels(
+                axes[row, 2],
+                pie_wedges,
+                [f"{name}\n{amount:.1f} Gt" for name, _weight, _color, amount in wedges],
+                radius,
+            )
+            margin = radius + 1.15
+            axes[row, 2].set_xlim(-margin, margin)
+            axes[row, 2].set_ylim(-margin, margin) 
 
     handles = [plt.Rectangle((0, 0), 1, 1, color=COLORS[name], alpha=OPACITY) for name in SECTORS]
     handles.append(Line2D([0], [0], color="black", linewidth=2))

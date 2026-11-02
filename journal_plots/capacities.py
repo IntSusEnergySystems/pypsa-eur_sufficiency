@@ -69,14 +69,19 @@ GROUPS = [
         },
     },
     {
-        "title": "Capacity for storage technologies [GWh]",
+        "title": "Capacity for storage technologies [TWh]",
         "short": "Storage",
-        "unit": "GWh",
-        "scale": 1e3,
+        "unit": "TWh",
+        "scale": 1e6,
         "techs": {
             "H2 Store": ["H2 Store"],
             "Grid-scale battery": ["battery"],
-            "home battery": ["home battery"],
+            "thermal energy storage": [
+                "rural water tanks",
+                "urban decentral water tanks",
+                "urban central water tanks",
+                "urban central water pits",
+            ],
         },
     },
     {
@@ -204,7 +209,7 @@ def _mark_groups(ax, labels: list[str], shorts: list[str]) -> None:
 
 def plot_dots(frame: pd.DataFrame) -> None:
     """One dot per scenario, technologies grouped on a shared scale per unit."""
-    units = ["GW", "GWh"]
+    units = ["GW", "TWh"]
     fig, axes = plt.subplots(1, 2, figsize=(12, 9), gridspec_kw={"width_ratios": [1.6, 1]})
     for ax, unit in zip(axes, units):
         part = frame.loc[frame["unit"] == unit].reset_index(drop=True)
@@ -242,7 +247,7 @@ def plot_dots(frame: pd.DataFrame) -> None:
 
 def plot_difference(frame: pd.DataFrame) -> None:
     """Suff and suff-nocdr minus Ref."""
-    units = ["GW", "GWh"]
+    units = ["GW", "TWh"]
     fig, axes = plt.subplots(1, 2, figsize=(12, 9), gridspec_kw={"width_ratios": [1.6, 1]})
     others = [scenario for scenario in common.SCENARIOS if scenario != "ref"]
     for ax, unit in zip(axes, units):
@@ -277,7 +282,7 @@ def plot_stacked(frame: pd.DataFrame) -> None:
     blocks = [
         ("Plants and conversion", ["VRE", "Dispatchable", "Conversion", "Carbon management"], "GW"),
         ("Grid", ["Grid"], "GW"),
-        ("Storage", ["Storage"], "GWh"),
+        ("Storage", ["Storage"], "TWh"),
     ]
     fig, axes = plt.subplots(1, 3, figsize=(15, 6))
     scenarios = [common.LABELS[scenario] for scenario in common.SCENARIOS]

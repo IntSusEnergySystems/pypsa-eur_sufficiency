@@ -2460,9 +2460,11 @@ def add_land_transport(
     electric_share = shares["electric"]
     fuel_cell_share = shares["fuel_cell"]
     ice_share = shares["ice"]
-    # CLEVER road shares are used for every scenario. Oil/ICE is whatever is
-    # left after electricity and hydrogen.
-    if clever_transport_file and pop_layout is not None:
+    # Sufficiency scenarios replace the config shares with CLEVER road shares.
+    # Oil/ICE is whatever is left after electricity and hydrogen. Reference
+    # keeps land_transport_*_share from the config.
+    if _is_sufficiency() and clever_transport_file and pop_layout is not None:
+        logger.info("Using CLEVER land-transport carrier shares")
         demands = pd.read_csv(clever_transport_file, index_col=0).fillna(0.0)
         clever_totals = demands.reindex(pop_layout.ct).fillna(0.0)
         clever_totals.index = pop_layout.index
@@ -2492,9 +2494,15 @@ def add_land_transport(
         electric_share = electric_share.fillna(shares["electric"])
         fuel_cell_share = fuel_cell_share.fillna(shares["fuel_cell"])
         ice_share = ice_share.fillna(shares["ice"])
+    else:
+        logger.info("Using config land-transport carrier shares")
 
-    # CLEVER carrier shares are used in every scenario. In the reference case,
-    # heating and drivetrain efficiency change the total energy only.
+    # Reference demand is vehicle-km. Each config share is converted to energy
+    # with that drivetrain's temperature-corrected efficiency. Sufficiency
+    # demand is already final energy, so the CLEVER shares apply directly.
+    p_set_electric = p_set
+    p_set_fuel_cell = p_set
+    p_set_ice = p_set
     if not _is_sufficiency():
         deadband_lower = options["transport_heating_deadband_lower"]
         deadband_upper = options["transport_heating_deadband_upper"]
@@ -2524,11 +2532,9 @@ def add_land_transport(
             options["ICE_lower_degree_factor"],
             options["ICE_upper_degree_factor"],
         )
-        p_set = (
-            electric_share * p_set.div(eff_electric)
-            + fuel_cell_share * p_set.div(eff_fuel_cell)
-            + ice_share * p_set.div(eff_ice)
-        )
+        p_set_electric = p_set.div(eff_electric)
+        p_set_fuel_cell = p_set.div(eff_fuel_cell)
+        p_set_ice = p_set.div(eff_ice)
 
     def _share_positive(share) -> bool:
         return bool(np.nansum(share) > 0)
@@ -2538,7 +2544,7 @@ def add_land_transport(
             n,
             avail_profile,
             dsm_profile,
-            p_set,
+            p_set_electric,
             electric_share,
             number_cars,
             temperature,
@@ -2548,7 +2554,7 @@ def add_land_transport(
     if _share_positive(fuel_cell_share):
         add_fuel_cell_cars(
             n=n,
-            p_set=p_set,
+            p_set=p_set_fuel_cell,
             fuel_cell_share=fuel_cell_share,
             temperature=temperature,
             options=options,
@@ -2558,7 +2564,7 @@ def add_land_transport(
         add_ice_cars(
             n,
             costs,
-            p_set,
+            p_set_ice,
             ice_share,
             temperature,
             cf_industry,
@@ -5265,10 +5271,13 @@ def add_shipping(
     shipping_methanol_share = get(options["shipping_methanol_share"], investment_year)
     shipping_oil_share = get(options["shipping_oil_share"], investment_year)
 
-    if clever_transport_file:
+    # Sufficiency scenarios replace the config shares with CLEVER maritime
+    # shares. Reference keeps shipping_*_share from the config.
+    if _is_sufficiency() and clever_transport_file:
         # CLEVER shipping energy is liquid fuels (oil), hydrogen, and every
         # other fuel (NGV, biomethane, and anything else PyPSA does not model),
-        # which is carried as methanol. Shares are applied in every scenario.
+        # which is carried as methanol.
+        logger.info("Using CLEVER shipping carrier shares")
         clever = pd.read_csv(clever_transport_file, index_col=0).fillna(0.0)
 
         def _clever_col(name: str) -> pd.Series:
@@ -5333,6 +5342,7 @@ def add_shipping(
         shipping_hydrogen_share = _nodal_share(hydrogen, shipping_hydrogen_share)
         shipping_methanol_share = _nodal_share(other, shipping_methanol_share)
     else:
+        logger.info("Using config shipping carrier shares")
         total_share = (
             shipping_hydrogen_share + shipping_methanol_share + shipping_oil_share
         )
@@ -5349,17 +5359,18 @@ def add_shipping(
     )
     all_navigation = domestic_navigation + international_navigation
     p_set = all_navigation * 1e6 / nhours
-    if not _is_sufficiency():
-        # Default PyPSA rescales hydrogen and methanol relative to oil. Fold
-        # that into the total, then apply the same CLEVER shares as sufficiency.
-        k_hydrogen = options["shipping_oil_efficiency"] / costs.at["fuel cell", "efficiency"]
+    # Reference navigation demand is oil-equivalent energy. Hydrogen and
+    # methanol are rescaled by their efficiency relative to oil, then split
+    # with the config shares. Sufficiency demand is already final energy.
+    if _is_sufficiency():
+        k_hydrogen = 1.0
+        k_methanol = 1.0
+    else:
+        k_hydrogen = (
+            options["shipping_oil_efficiency"] / costs.at["fuel cell", "efficiency"]
+        )
         k_methanol = (
             options["shipping_oil_efficiency"] / options["shipping_methanol_efficiency"]
-        )
-        p_set = (
-            shipping_hydrogen_share * p_set * k_hydrogen
-            + shipping_methanol_share * p_set * k_methanol
-            + shipping_oil_share * p_set
         )
 
     if np.nansum(shipping_hydrogen_share) > 0:
@@ -5390,7 +5401,7 @@ def add_shipping(
         else:
             shipping_bus = nodes + " H2"
 
-        p_set_hydrogen = shipping_hydrogen_share * p_set
+        p_set_hydrogen = shipping_hydrogen_share * p_set * k_hydrogen
 
         n.add(
             "Load",
@@ -5402,9 +5413,9 @@ def add_shipping(
         )
 
     if np.nansum(shipping_methanol_share) > 0:
-        p_set_methanol_shipping = (shipping_methanol_share * p_set).rename(
-            lambda x: x + " shipping methanol"
-        )
+        p_set_methanol_shipping = (
+            shipping_methanol_share * p_set * k_methanol
+        ).rename(lambda x: x + " shipping methanol")
 
         if not options["methanol"]["regional_methanol_demand"]:
             p_set_methanol_shipping = p_set_methanol_shipping.sum()
